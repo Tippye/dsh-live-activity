@@ -1,0 +1,56 @@
+{
+  "name": "@local/dsh-live-activity",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Live activity cards: floating status windows an agent creates, updates and ends for long-running work.",
+  "license": "MIT",
+  "author": "Tippye",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "live-activity",
+    "status-card",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tippye/dsh-live-activity.git"
+  },
+  "homepage": "https://github.com/Tippye/dsh-live-activity#readme",
+  "bugs": {
+    "url": "https://github.com/Tippye/dsh-live-activity/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "model.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "test",
+    "README.md",
+    "README.en.md"
+  ],
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "scripts": {
+    "test": "node test/model.test.js"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

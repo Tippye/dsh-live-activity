@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-live-activity
+      name: '@local/dsh-live-activity'
+      config: {}

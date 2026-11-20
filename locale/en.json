@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Live activities",
+    "description": "Floating status cards an agent creates, updates and ends for long-running work: phase, progress and an expected-finish countdown stay visible above the DSH window after the reply ends, and a card survives an app restart until it is ended or expires."
+  }
+}
