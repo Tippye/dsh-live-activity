@@ -24,6 +24,7 @@ window.__ModuleLoader__.load({
       removesIn: 'Removed in {left}',
       retained: 'Kept until {time}',
       progress: '{percent}% complete',
+      percent: '{percent}%',
       counts: '{done} / {total}',
       seriesLatest: 'latest',
       seriesRange: '{low} – {high}',
@@ -50,6 +51,7 @@ window.__ModuleLoader__.load({
       removesIn: '{left} 后移除',
       retained: '保留至 {time}',
       progress: '已完成 {percent}%',
+      percent: '{percent}%',
       counts: '{done} / {total}',
       seriesLatest: '最新',
       seriesRange: '{low} – {high}',
@@ -82,48 +84,52 @@ window.__ModuleLoader__.load({
     };
 
     const CSS = [
-      '.dla{position:fixed;z-index:60;display:flex;flex-direction:column;gap:10px;width:min(336px,calc(100vw - 24px));pointer-events:none;font:inherit;color:var(--dsw-alias-label-primary)}',
+      '.dla{position:fixed;z-index:60;display:flex;flex-direction:column;gap:8px;width:min(340px,calc(100vw - 24px));pointer-events:none;font:inherit;color:var(--dsw-alias-label-primary)}',
       '.dla *{box-sizing:border-box}',
-      '.dla-card{pointer-events:auto;position:relative;border:1px solid var(--dsw-alias-border-l1);border-radius:15px;background:var(--dsw-alias-bg-overlay);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);box-shadow:0 16px 40px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);overflow:hidden}',
-      '.dla-card[data-ended="true"]{box-shadow:0 10px 26px rgba(0,0,0,.12),0 1px 4px rgba(0,0,0,.06)}',
-      '.dla-card[data-ended="true"] .dla-body{opacity:.72}',
-      '.dla-head{display:flex;align-items:center;gap:9px;padding:10px 8px 8px 12px;cursor:grab;touch-action:none;user-select:none}',
+      '.dla-card{pointer-events:auto;position:relative;display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 2px rgba(0,0,0,.05)}',
+      '.dla-card[data-ended="true"]{box-shadow:none}',
+      '.dla-card[data-ended="true"] .dla-main{opacity:.6}',
+      '.dla-head{display:flex;align-items:flex-start;gap:8px;margin:-4px -4px 0;padding:4px;border-radius:8px;cursor:grab;touch-action:none;user-select:none}',
       '.dla-head:active{cursor:grabbing}',
-      '.dla-head:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
-      '.dla-glyph{flex:none;display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:9px;background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}',
-      '.dla-titles{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}',
-      '.dla-title{font-size:12px;font-weight:600;letter-spacing:.01em;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '.dla-sub{font-size:11px;color:var(--dsw-alias-label-secondary);opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '.dla-close{flex:none;display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:.55}',
+      '.dla-head:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:0}',
+      '.dla-glyph{flex:none;margin-top:1px;color:var(--dsw-alias-label-secondary)}',
+      '.dla-titles{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
+      '.dla-title{font-size:13px;font-weight:500;line-height:1.35;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-sub{font-size:11px;line-height:1.35;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-close{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:.6}',
       '.dla-close:hover{background:var(--dsw-alias-bg-layer-2);opacity:1}',
-      '.dla-body{padding:0 12px 11px}',
-      '.dla-phase{font-size:15px;font-weight:600;line-height:1.32;letter-spacing:-.1px;overflow-wrap:anywhere}',
-      '.dla-detail{margin-top:3px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}',
-      '.dla-bar{margin-top:10px;height:3px;border-radius:2px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}',
-      '.dla-bar>i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width .35s ease}',
-      '.dla-meta{margin-top:9px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary)}',
-      '.dla-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);font-variant-numeric:tabular-nums;white-space:nowrap}',
-      '.dla-chip[data-tone="accent"]{color:var(--accent)}',
-      '.dla-chip[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}',
-      '.dla-chip[data-tone="success"]{color:var(--dsw-alias-state-success-primary)}',
-      '.dla-foot{margin-top:7px;font-size:10.5px;color:var(--dsw-alias-label-secondary);opacity:.7;font-variant-numeric:tabular-nums}',
-      '.dla-series{margin-top:11px;display:flex;flex-direction:column;gap:7px}',
-      '.dla-series-row{display:flex;align-items:center;gap:8px;min-width:0}',
-      '.dla-series-name{flex:none;max-width:42%;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '.dla-series-chart{flex:1;min-width:0;height:26px;display:block;overflow:visible}',
-      '.dla-series-chart polyline{fill:none;stroke:var(--accent);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}',
-      '.dla-series-chart polygon{fill:var(--accent);opacity:.12;stroke:none}',
-      '.dla-series-chart circle{fill:var(--accent);stroke:none}',
-      '.dla-series-value{flex:none;font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}',
-      '.dla-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;align-self:flex-end;max-width:100%;padding:8px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-overlay);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);box-shadow:0 10px 26px rgba(0,0,0,.16),0 1px 4px rgba(0,0,0,.06);cursor:pointer;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary)}',
-      '.dla-pill:hover{background:var(--dsw-alias-bg-layer-1)}',
+      '.dla-main{display:flex;flex-direction:column;gap:10px}',
+      '.dla-phase{font-size:12px;line-height:1.45;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}',
+      '.dla-value{display:flex;align-items:baseline;gap:8px}',
+      '.dla-value>b{font-size:24px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}',
+      '.dla-value>span{font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+      '.dla-bar{margin-top:2px;height:6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}',
+      '.dla-bar>i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .4s cubic-bezier(.4,0,.2,1)}',
+      '.dla-detail{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+      '.dla-series{display:flex;flex-direction:column;gap:10px}',
+      '.dla-series-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:5px}',
+      '.dla-series-name{font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-series-value{font-size:12px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap}',
+      '.dla-series-chart{display:block;width:100%;height:40px;overflow:visible}',
+      '.dla-series-chart .dla-grid{stroke:var(--dsw-alias-border-l1);stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}',
+      '.dla-series-chart .dla-baseline{stroke:var(--dsw-alias-border-l1);stroke-width:1;vector-effect:non-scaling-stroke}',
+      '.dla-series-chart .dla-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}',
+      '.dla-series-chart .dla-area{stroke:none}',
+      '.dla-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}',
+      '.dla-badge{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;font-size:10.5px;line-height:1.55;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}',
+      '.dla-badge[data-tone="accent"]{color:var(--accent)}',
+      '.dla-badge[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}',
+      '.dla-badge[data-tone="success"]{color:var(--dsw-alias-state-success-primary)}',
+      '.dla-foot{font-size:10.5px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+      '.dla-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;align-self:flex-end;max-width:100%;padding:6px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 2px rgba(0,0,0,.05);cursor:pointer;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary)}',
+      '.dla-pill:hover{background:var(--dsw-alias-bg-layer-2)}',
       '.dla-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}',
-      '.dla-pill-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}',
+      '.dla-pill-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}',
       '.dla-pill-count{flex:none;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary);font-weight:400}',
-      '.dla-actions{display:flex;justify-content:flex-end;align-items:center;gap:6px;pointer-events:none}',
-      '.dla-more{pointer-events:auto;display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border:0;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer}',
-      '.dla-more:hover{color:var(--dsw-alias-label-primary)}',
-      '.dla-error{pointer-events:auto;align-self:flex-end;padding:5px 9px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);font-size:11px;color:var(--dsw-alias-state-warn-primary)}',
+      '.dla-actions{display:flex;justify-content:flex-end;align-items:center;gap:4px;pointer-events:none}',
+      '.dla-more{pointer-events:auto;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer}',
+      '.dla-more:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
+      '.dla-error{pointer-events:auto;align-self:flex-end;padding:5px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);font-size:11px;color:var(--dsw-alias-state-warn-primary)}',
     ].join('');
 
     const pad = value => String(value).padStart(2, '0');
@@ -227,7 +233,7 @@ window.__ModuleLoader__.load({
     function Glyph({ symbol }) {
       return h(
         'svg',
-        { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+        { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
         h('path', { d: GLYPHS[symbol] || GLYPHS.task }),
       );
     }
@@ -239,34 +245,65 @@ window.__ModuleLoader__.load({
       return String(parseFloat(value.toPrecision(3)));
     }
 
-    /** One bounded sparkline per named series: the loss curve, throughput, latency. */
-    function SeriesChart({ series, t }) {
+    /** A shadcn-style area chart: 2px stroke, gradient fill, dashed horizontal grid. */
+    function SeriesChart({ series, gradientId, t }) {
       const samples = (series.samples || []).filter(sample => Number.isFinite(sample.value));
       if (!samples.length) return null;
       const width = 100;
-      const height = 26;
-      const pad = 2.5;
-      const low = Math.min(...samples.map(sample => sample.value));
-      const high = Math.max(...samples.map(sample => sample.value));
+      const height = 40;
+      const padY = 5;
+      const values = samples.map(sample => sample.value);
+      const low = Math.min(...values);
+      const high = Math.max(...values);
       const span = high - low;
-      const x = index => (samples.length === 1 ? width - pad : pad + (index * (width - pad * 2)) / (samples.length - 1));
-      const y = value => (span === 0 ? height / 2 : pad + (1 - (value - low) / span) * (height - pad * 2));
-      const points = samples.map((sample, index) => `${x(index).toFixed(2)},${y(sample.value).toFixed(2)}`).join(' ');
+      const x = index => (samples.length === 1 ? width : (index * width) / (samples.length - 1));
+      const y = value => (span === 0 ? height / 2 : padY + (1 - (value - low) / span) * (height - padY * 2));
+      const points = samples.map((sample, index) => [x(index), y(sample.value)]);
+      let line;
+      if (points.length === 1) line = `M 0 ${points[0][1].toFixed(2)} L ${width} ${points[0][1].toFixed(2)}`;
+      else {
+        line = `M ${points[0][0].toFixed(2)} ${points[0][1].toFixed(2)}`;
+        for (let index = 1; index < points.length - 1; index++) {
+          const [x0, y0] = points[index];
+          const [x1, y1] = points[index + 1];
+          line += ` Q ${x0.toFixed(2)} ${y0.toFixed(2)} ${((x0 + x1) / 2).toFixed(2)} ${((y0 + y1) / 2).toFixed(2)}`;
+        }
+        const last = points[points.length - 1];
+        line += ` L ${last[0].toFixed(2)} ${last[1].toFixed(2)}`;
+      }
+      const area = `${line} L ${width} ${height} L 0 ${height} Z`;
       const last = samples[samples.length - 1];
       const label = `${series.name}: ${t('seriesLatest')} ${formatNumber(last.value)}${series.unit || ''} · ${t('seriesRange', { low: formatNumber(low), high: formatNumber(high) })}`;
       return h(
         'div',
-        { className: 'dla-series-row' },
-        h('span', { className: 'dla-series-name', title: series.name }, series.name),
+        null,
+        h(
+          'div',
+          { className: 'dla-series-head' },
+          h('span', { className: 'dla-series-name', title: series.name }, series.name),
+          h('span', { className: 'dla-series-value' }, formatNumber(last.value) + (series.unit || '')),
+        ),
         h(
           'svg',
           { className: 'dla-series-chart', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': label },
           h('title', null, label),
-          samples.length > 1 ? h('polygon', { points: `${points} ${x(samples.length - 1).toFixed(2)},${height - pad} ${x(0).toFixed(2)},${height - pad}` }) : null,
-          samples.length > 1 ? h('polyline', { points, vectorEffect: 'non-scaling-stroke' }) : null,
-          h('circle', { cx: x(samples.length - 1).toFixed(2), cy: y(last.value).toFixed(2), r: 1.7 }),
+          h(
+            'defs',
+            null,
+            h(
+              'linearGradient',
+              { id: gradientId, x1: 0, y1: 0, x2: 0, y2: 1 },
+              h('stop', { offset: '0%', stopColor: 'var(--accent)', stopOpacity: 0.22 }),
+              h('stop', { offset: '100%', stopColor: 'var(--accent)', stopOpacity: 0.02 }),
+            ),
+          ),
+          [0.25, 0.5, 0.75].map(fraction =>
+            h('line', { key: fraction, className: 'dla-grid', x1: 0, y1: height * fraction, x2: width, y2: height * fraction }),
+          ),
+          h('line', { className: 'dla-baseline', x1: 0, y1: height, x2: width, y2: height }),
+          h('path', { className: 'dla-area', d: area, fill: `url(#${gradientId})` }),
+          h('path', { className: 'dla-line', d: line }),
         ),
-        h('span', { className: 'dla-series-value' }, formatNumber(last.value) + (series.unit || '')),
       );
     }
 
@@ -283,28 +320,29 @@ window.__ModuleLoader__.load({
       const remaining = eta === null ? null : eta * 1000 - now;
       const dismissIn = ended && Number.isFinite(activity.dismissAt) ? activity.dismissAt - now : null;
 
-      const chips = [];
-      if (counted) chips.push(h('span', { key: 'counts', className: 'dla-chip', 'data-tone': 'accent' }, t('counts', { done: state.completed, total: state.total })));
-      else if (progress !== null) chips.push(h('span', { key: 'percent', className: 'dla-chip', 'data-tone': 'accent' }, t('progress', { percent: Math.round(progress * 100) })));
+      /** The headline number is the card's reason to exist; badges carry the rest. */
+      const badges = [];
       if (remaining !== null) {
-        chips.push(
+        badges.push(
           h(
             'span',
-            { key: 'eta', className: 'dla-chip', 'data-tone': remaining <= 0 ? 'warn' : 'accent' },
-            h('span', { 'aria-hidden': true }, '\u23f1'),
-            remaining <= 0 ? t('overdue', { time: clockOf(eta) }) : t('eta', { time: clockOf(eta) }),
-            remaining > 0 ? ' \u00b7 ' + t('etaLeft', { left: countdown(remaining) }) : '',
+            { key: 'eta', className: 'dla-badge', 'data-tone': remaining <= 0 ? 'warn' : 'accent' },
+            remaining <= 0
+              ? t('overdue', { time: clockOf(eta) })
+              : t('eta', { time: clockOf(eta) }) + ' \u00b7 ' + t('etaLeft', { left: countdown(remaining) }),
           ),
         );
       }
-      if (stale) chips.push(h('span', { key: 'stale', className: 'dla-chip', 'data-tone': 'warn' }, t('stale')));
-      if (ended) chips.push(h('span', { key: 'ended', className: 'dla-chip', 'data-tone': 'success' }, t('ended')));
+      if (stale) badges.push(h('span', { key: 'stale', className: 'dla-badge', 'data-tone': 'warn' }, t('stale')));
+      if (ended) badges.push(h('span', { key: 'ended', className: 'dla-badge', 'data-tone': 'success' }, t('ended')));
 
       const footer = ended
         ? dismissIn !== null && dismissIn > 0
           ? t('removesIn', { left: countdown(dismissIn) })
           : t('ended')
         : refreshed(activity.updatedAt, now, t);
+
+      const gradientBase = `dla-grad-${String(activity.id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
       return h(
         'article',
@@ -352,14 +390,39 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
-          { className: 'dla-body' },
+          { className: 'dla-main' },
           h('div', { className: 'dla-phase', role: 'status' }, state.phase),
+          progress !== null
+            ? h(
+                React.Fragment,
+                null,
+                h(
+                  'div',
+                  { className: 'dla-value' },
+                  h('b', null, t('percent', { percent: Math.round(progress * 100) })),
+                  counted ? h('span', null, t('counts', { done: state.completed, total: state.total })) : null,
+                ),
+                h(
+                  'div',
+                  {
+                    className: 'dla-bar',
+                    role: 'progressbar',
+                    'aria-valuemin': 0,
+                    'aria-valuemax': 100,
+                    'aria-valuenow': Math.round(progress * 100),
+                    'aria-label': counted ? t('counts', { done: state.completed, total: state.total }) : t('progress', { percent: Math.round(progress * 100) }),
+                  },
+                  h('i', { style: { width: (progress * 100).toFixed(1) + '%' } }),
+                ),
+              )
+            : null,
+          series.length
+            ? h('div', { className: 'dla-series' }, series.map((item, index) => h(SeriesChart, { key: item.name, series: item, gradientId: `${gradientBase}-${index}`, t })))
+            : null,
           state.detail ? h('div', { className: 'dla-detail' }, state.detail) : null,
-          progress !== null ? h('div', { className: 'dla-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(progress * 100), 'aria-label': counted ? t('counts', { done: state.completed, total: state.total }) : t('progress', { percent: Math.round(progress * 100) }) }, h('i', { style: { width: (progress * 100).toFixed(1) + '%' } })) : null,
-          series.length ? h('div', { className: 'dla-series' }, series.map(item => h(SeriesChart, { key: item.name, series: item, t }))) : null,
-          chips.length ? h('div', { className: 'dla-meta' }, chips) : null,
-          h('div', { className: 'dla-foot' }, footer),
+          badges.length ? h('div', { className: 'dla-meta' }, badges) : null,
         ),
+        h('div', { className: 'dla-foot' }, footer),
       );
     }
 

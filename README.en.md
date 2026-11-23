@@ -36,6 +36,10 @@ A card is only for work that keeps reporting a quantity that changes while it ru
 
 Refused: status-only narration, an already finished step, an ETA on its own, a single tool call, a decision or confirmation. Those belong in the reply; use `dsh_board` when a durable checklist is what the user needs. Once a card exists, an `update` may not drop both the progress and the series (call `end` to close it), so a card cannot degrade into a text-only badge.
 
+## Look
+
+The card follows the visual language of [shadcn charts](https://ui.shadcn.com/charts/area): a flat card (1 px border, near-flat shadow, no glassmorphism); a `13px/500` title over a `12px` muted phase line; progress as a `24px/600` tabular percentage with a 6 px rounded track; one area chart per numeric series — 2 px stroke, a gradient fill fading downward, three dashed horizontal grid lines; times and states as outlined badges instead of coloured pills. Every colour comes from `--dsw-alias-*` theme tokens, so light and dark themes both hold.
+
 ## Mapped to ActivityKit
 
 | ActivityKit | This plugin |
