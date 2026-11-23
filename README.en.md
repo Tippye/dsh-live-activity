@@ -67,7 +67,15 @@ Once enabled, nothing to configure. Ask the agent to do something with progress 
 
 A status-only task ("check the version", "verify where the report came from") no longer gets a card — it is refused and the agent writes it in the reply. The same rule covers cards created before the gate existed: an old status card cannot be `update`d any more, but it can still be `end`ed normally.
 
-Cards appear in the window's top-right corner (`top: 72px; right: 20px`) by default. Drag a card's header to move the whole stack; focus a header and use the arrow keys for the same (`Shift` + arrows for 4 px steps). Position and collapsed state persist in local storage. Click the × on a card to remove it, or the chevron at the bottom to collapse the stack into a pill. More than 3 cards collapse to "N more". If the card route fails 3 polls in a row, a dismissible "Live activities are unavailable" notice appears once, instead of every card reporting its own error.
+Cards appear in the window's top-right corner (`top: 72px; right: 20px`) by default, flowing downward when there are several. **Each card is independent:**
+
+| Action | How |
+|---|---|
+| Drag | Drag a card's header (or its collapsed pill) to move just that card; focus it and use the arrow keys for the same, `Shift` + arrows for 4 px steps |
+| Collapse | The chevron in the header folds that one card into a slim pill (dot, title, phase, value); click the pill or press Enter to expand it, and the pill still drags and closes |
+| Close | The × in the header or on the pill removes that one card (the same as `live_activity` with `dismiss`) |
+
+Each card keeps its own position and collapsed state in local storage under its id, so they survive a restart; layout records of removed cards are dropped on the next poll. If the card route fails 3 polls in a row, a dismissible "Live activities are unavailable" notice appears once, instead of every card reporting its own error.
 
 ## Agent API
 

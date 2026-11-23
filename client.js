@@ -6,12 +6,15 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useRef, useCallback } = React;
 
     const NS = 'dsh-live-activity';
-    const STORAGE_KEY = 'dsh-live-activity:layout';
+    const LAYOUT_KEY = 'dsh-live-activity:layout:v2';
+    const LEGACY_LAYOUT_KEY = 'dsh-live-activity:layout';
     const POLL_MS = 2000;
-    const MAX_COLLAPSED = 3;
+    const CARD_GAP = 8;
+    const ANCHOR_TOP = 72;
+    const ANCHOR_RIGHT = 20;
+    const MIN_TOP = 8;
 
     const en = {
-      group: 'Live activities',
       refreshedJustNow: 'just now',
       refreshedSeconds: '{n}s ago',
       refreshedMinutes: '{n}m ago',
@@ -22,23 +25,18 @@ window.__ModuleLoader__.load({
       stale: 'Needs refresh',
       ended: 'Ended',
       removesIn: 'Removed in {left}',
-      retained: 'Kept until {time}',
       progress: '{percent}% complete',
       percent: '{percent}%',
       counts: '{done} / {total}',
       seriesLatest: 'latest',
       seriesRange: '{low} – {high}',
       dismiss: 'Dismiss this activity',
-      collapse: 'Collapse live activities',
-      expand: 'Expand live activities',
-      more: '{n} more',
-      less: 'Show less',
+      collapse: 'Collapse this activity',
+      expand: 'Expand this activity',
       unavailable: 'Live activities are unavailable',
       dragHint: 'Drag to move',
-      count: '{n} active',
     };
     const zh = {
-      group: '实时活动',
       refreshedJustNow: '刚刚更新',
       refreshedSeconds: '{n} 秒前更新',
       refreshedMinutes: '{n} 分钟前更新',
@@ -49,20 +47,16 @@ window.__ModuleLoader__.load({
       stale: '待更新',
       ended: '已结束',
       removesIn: '{left} 后移除',
-      retained: '保留至 {time}',
       progress: '已完成 {percent}%',
       percent: '{percent}%',
       counts: '{done} / {total}',
       seriesLatest: '最新',
       seriesRange: '{low} – {high}',
       dismiss: '移除这个实时活动',
-      collapse: '收起实时活动',
-      expand: '展开实时活动',
-      more: '还有 {n} 个',
-      less: '收起',
+      collapse: '收起这张卡片',
+      expand: '展开这张卡片',
       unavailable: '实时活动暂不可用',
       dragHint: '拖动可移动',
-      count: '{n} 个进行中',
     };
 
     const ACCENTS = {
@@ -84,8 +78,10 @@ window.__ModuleLoader__.load({
     };
 
     const CSS = [
-      '.dla{position:fixed;z-index:60;display:flex;flex-direction:column;gap:8px;width:min(340px,calc(100vw - 24px));pointer-events:none;font:inherit;color:var(--dsw-alias-label-primary)}',
-      '.dla *{box-sizing:border-box}',
+      '.dla-slot{position:fixed;z-index:60;width:min(340px,calc(100vw - 24px));pointer-events:none;font:inherit;color:var(--dsw-alias-label-primary)}',
+      '.dla-slot *,.dla-mini *{box-sizing:border-box}',
+      '.dla-slot[data-collapsed="true"]{width:auto;max-width:min(340px,calc(100vw - 24px))}',
+      '.dla-slot[data-front="true"]{z-index:61}',
       '.dla-card{pointer-events:auto;position:relative;display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 2px rgba(0,0,0,.05)}',
       '.dla-card[data-ended="true"]{box-shadow:none}',
       '.dla-card[data-ended="true"] .dla-main{opacity:.6}',
@@ -96,8 +92,9 @@ window.__ModuleLoader__.load({
       '.dla-titles{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
       '.dla-title{font-size:13px;font-weight:500;line-height:1.35;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '.dla-sub{font-size:11px;line-height:1.35;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '.dla-close{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:.6}',
-      '.dla-close:hover{background:var(--dsw-alias-bg-layer-2);opacity:1}',
+      '.dla-head-actions{flex:none;display:flex;align-items:center;gap:2px}',
+      '.dla-icon-btn{display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:.6}',
+      '.dla-icon-btn:hover{background:var(--dsw-alias-bg-layer-2);opacity:1}',
       '.dla-main{display:flex;flex-direction:column;gap:10px}',
       '.dla-phase{font-size:12px;line-height:1.45;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}',
       '.dla-value{display:flex;align-items:baseline;gap:8px}',
@@ -121,35 +118,47 @@ window.__ModuleLoader__.load({
       '.dla-badge[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}',
       '.dla-badge[data-tone="success"]{color:var(--dsw-alias-state-success-primary)}',
       '.dla-foot{font-size:10.5px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
-      '.dla-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;align-self:flex-end;max-width:100%;padding:6px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 2px rgba(0,0,0,.05);cursor:pointer;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary)}',
-      '.dla-pill:hover{background:var(--dsw-alias-bg-layer-2)}',
+      '.dla-mini{pointer-events:auto;display:flex;align-items:center;gap:7px;max-width:100%;padding:6px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 2px rgba(0,0,0,.05);cursor:grab;touch-action:none;user-select:none}',
+      '.dla-mini:active{cursor:grabbing}',
+      '.dla-mini:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '.dla-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}',
-      '.dla-pill-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}',
-      '.dla-pill-count{flex:none;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary);font-weight:400}',
-      '.dla-actions{display:flex;justify-content:flex-end;align-items:center;gap:4px;pointer-events:none}',
-      '.dla-more{pointer-events:auto;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer}',
-      '.dla-more:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
-      '.dla-error{pointer-events:auto;align-self:flex-end;padding:5px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);font-size:11px;color:var(--dsw-alias-state-warn-primary)}',
+      '.dla-mini-title{flex:none;max-width:40%;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-mini-phase{flex:1;min-width:0;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-mini-value{flex:none;font-size:11px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}',
+      '.dla-mini-value[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}',
+      '.dla-mini-close{flex:none;display:flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:.55}',
+      '.dla-mini-close:hover{background:var(--dsw-alias-bg-layer-2);opacity:1}',
+      '.dla-error{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;padding:5px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);font-size:11px;color:var(--dsw-alias-state-warn-primary)}',
+      '.dla-error>button{padding:0;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer;text-decoration:underline}',
     ].join('');
 
     const pad = value => String(value).padStart(2, '0');
     const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 
+    /** Per-card layout: a card owns its position and its collapsed state. */
     function readLayout() {
       try {
-        const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-        if (!raw || typeof raw !== 'object') return { x: null, y: null, collapsed: false };
-        const x = Number.isFinite(raw.x) ? clamp(raw.x, 0, window.innerWidth - 120) : null;
-        const y = Number.isFinite(raw.y) ? clamp(raw.y, 0, window.innerHeight - 60) : null;
-        return { x, y, collapsed: raw.collapsed === true };
+        const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) || 'null');
+        const stored = raw && typeof raw === 'object' && raw.cards && typeof raw.cards === 'object' ? raw.cards : {};
+        const cards = {};
+        for (const [id, entry] of Object.entries(stored)) {
+          if (!entry || typeof entry !== 'object') continue;
+          cards[id] = {
+            x: Number.isFinite(entry.x) ? entry.x : null,
+            y: Number.isFinite(entry.y) ? entry.y : null,
+            collapsed: entry.collapsed === true,
+          };
+        }
+        return { cards };
       } catch (_) {
-        return { x: null, y: null, collapsed: false };
+        return { cards: {} };
       }
     }
 
     function saveLayout(value) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(value));
+        localStorage.removeItem(LEGACY_LAYOUT_KEY);
       } catch (_) {
         // A profile that blocks storage still gets a working, non-persistent card.
       }
@@ -307,7 +316,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function ActivityCard({ activity, now, t, onDismiss, onDragStart, onDragMove, onDragEnd, onMoveKey }) {
+    function ActivityCard({ activity, now, t, onDismiss, onCollapse, onDragStart, onDragMove, onDragEnd, onMoveKey }) {
       const attributes = activity.attributes || {};
       const state = activity.state || {};
       const accent = ACCENTS[attributes.accent] || ACCENTS.brand;
@@ -369,22 +378,45 @@ window.__ModuleLoader__.load({
             attributes.subtitle ? h('span', { className: 'dla-sub' }, attributes.subtitle) : null,
           ),
           h(
-            'button',
-            {
-              type: 'button',
-              className: 'dla-close',
-              'aria-label': t('dismiss'),
-              title: t('dismiss'),
-              onPointerDown: event => event.stopPropagation(),
-              onClick: event => {
-                event.stopPropagation();
-                onDismiss(activity.id);
-              },
-            },
+            'span',
+            { className: 'dla-head-actions' },
             h(
-              'svg',
-              { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': true },
-              h('path', { d: 'm6 6 12 12M18 6 6 18' }),
+              'button',
+              {
+                type: 'button',
+                className: 'dla-icon-btn',
+                'aria-label': t('collapse'),
+                title: t('collapse'),
+                onPointerDown: event => event.stopPropagation(),
+                onClick: event => {
+                  event.stopPropagation();
+                  onCollapse();
+                },
+              },
+              h(
+                'svg',
+                { width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+                h('path', { d: 'm6 15 6-6 6 6' }),
+              ),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dla-icon-btn',
+                'aria-label': t('dismiss'),
+                title: t('dismiss'),
+                onPointerDown: event => event.stopPropagation(),
+                onClick: event => {
+                  event.stopPropagation();
+                  onDismiss(activity.id);
+                },
+              },
+              h(
+                'svg',
+                { width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': true },
+                h('path', { d: 'm6 6 12 12M18 6 6 18' }),
+              ),
             ),
           ),
         ),
@@ -430,53 +462,94 @@ window.__ModuleLoader__.load({
       const { activities, error, failures } = useActivities();
       const now = useNow(1000);
       const [layout, setLayout] = useState(readLayout);
-      const [expanded, setExpanded] = useState(false);
       const [removed, setRemoved] = useState(() => new Set());
       const [noticeHidden, setNoticeHidden] = useState(false);
+      const [front, setFront] = useState(null);
+      const [, bump] = useState(0);
       const layoutRef = useRef(layout);
       const dragRef = useRef(null);
-      const rootRef = useRef(null);
+      const slots = useRef(new Map());
+      const heights = useRef(new Map());
       layoutRef.current = layout;
 
-      const dismiss = useCallback(
-        async id => {
+      /** Every card owns its own position and its own collapsed flag. */
+      const patch = useCallback((id, change) => {
+        const previous = layoutRef.current.cards[id] || { x: null, y: null, collapsed: false };
+        const next = { cards: { ...layoutRef.current.cards, [id]: { ...previous, ...change } } };
+        setLayout(next);
+        saveLayout(next);
+      }, []);
+
+      const dismiss = useCallback(async id => {
+        setRemoved(previous => {
+          const next = new Set(previous);
+          next.add(id);
+          return next;
+        });
+        try {
+          await api({ action: 'dismiss', id });
+        } catch (_) {
           setRemoved(previous => {
             const next = new Set(previous);
-            next.add(id);
+            next.delete(id);
             return next;
           });
-          try {
-            await api({ action: 'dismiss', id });
-          } catch (_) {
-            setRemoved(previous => {
-              const next = new Set(previous);
-              next.delete(id);
-              return next;
-            });
-          }
-        },
-        [],
-      );
-
-      const release = useCallback(() => {
-        if (!dragRef.current) return;
-        dragRef.current = null;
-        saveLayout(layoutRef.current);
+        }
       }, []);
+
+      const fit = useCallback((x, y) => ({
+        x: clamp(x, 0, Math.max(0, window.innerWidth - 160)),
+        y: clamp(y, MIN_TOP, Math.max(MIN_TOP, window.innerHeight - 48)),
+      }), []);
+
+      // A stored position is worth keeping only while its card exists.
+      useEffect(() => {
+        if (error) return;
+        const live = new Set(activities.map(activity => activity.id));
+        const cards = layoutRef.current.cards;
+        if (!Object.keys(cards).some(id => !live.has(id))) return;
+        const next = { cards: Object.fromEntries(Object.entries(cards).filter(([id]) => live.has(id))) };
+        setLayout(next);
+        saveLayout(next);
+      }, [activities, error]);
+
+      // Cards the user never moved flow under one another; measured heights keep
+      // the column gapless when a card grows another row of series. A layout
+      // effect measures before the first paint, so the row never flashes at 140.
+      React.useLayoutEffect(() => {
+        let changed = false;
+        for (const [id, element] of slots.current) {
+          const height = element ? element.getBoundingClientRect().height : 0;
+          if (height > 0 && Math.abs((heights.current.get(id) || 0) - height) > 0.5) {
+            heights.current.set(id, height);
+            changed = true;
+          }
+        }
+        if (changed) bump(version => version + 1);
+      });
 
       useEffect(() => {
         const onResize = () => {
-          const current = layoutRef.current;
-          if (current.x === null) return;
-          setLayout({
-            ...current,
-            x: clamp(current.x, 0, Math.max(0, window.innerWidth - 140)),
-            y: clamp(current.y, 0, Math.max(0, window.innerHeight - 60)),
-          });
+          const cards = layoutRef.current.cards;
+          let changed = false;
+          const next = {};
+          for (const [id, entry] of Object.entries(cards)) {
+            if (entry.x === null || entry.y === null) {
+              next[id] = entry;
+              continue;
+            }
+            const fitted = fit(entry.x, entry.y);
+            if (fitted.x !== entry.x || fitted.y !== entry.y) changed = true;
+            next[id] = { ...entry, ...fitted };
+          }
+          if (!changed) return;
+          const value = { cards: next };
+          setLayout(value);
+          saveLayout(value);
         };
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
-      }, []);
+      }, [fit]);
 
       const visible = activities.filter(activity => {
         if (removed.has(activity.id)) return false;
@@ -487,40 +560,40 @@ window.__ModuleLoader__.load({
       // One failed poll is a blip; three in a row means the card surface is
       // unreachable, and that is worth telling the user about once.
       const unavailable = !!error && failures >= 3 && !noticeHidden && !visible.length;
-      if (!visible.length) {
-        return unavailable
-          ? h(
-              'div',
-              { className: 'dla', style: anchorOf(layout) },
-              h('style', null, CSS),
-              h(
-                'div',
-                { className: 'dla-error', role: 'status' },
-                t('unavailable'),
-                h('button', { type: 'button', className: 'dla-more', onClick: () => setNoticeHidden(true) }, t('dismiss')),
-              ),
-            )
-          : null;
-      }
 
-      const starting = event => {
-        if (event.button !== 0 || !rootRef.current) return;
-        const rect = rootRef.current.getBoundingClientRect();
-        dragRef.current = { dx: event.clientX - rect.left, dy: event.clientY - rect.top, id: event.pointerId };
+      const startDrag = (id, event, options) => {
+        if (event.button !== 0) return;
+        const element = slots.current.get(id);
+        if (!element) return;
+        const rect = element.getBoundingClientRect();
+        dragRef.current = {
+          id,
+          dx: event.clientX - rect.left,
+          dy: event.clientY - rect.top,
+          startX: event.clientX,
+          startY: event.clientY,
+          moved: false,
+          expandOnClick: options ? options.expandOnClick === true : false,
+        };
+        setFront(id);
         if (event.currentTarget.setPointerCapture) event.currentTarget.setPointerCapture(event.pointerId);
         event.preventDefault();
       };
-      const moving = event => {
+
+      const moveDrag = event => {
         const drag = dragRef.current;
         if (!drag) return;
-        setLayout(previous => ({
-          ...previous,
-          x: clamp(event.clientX - drag.dx, 0, Math.max(0, window.innerWidth - 140)),
-          y: clamp(event.clientY - drag.dy, 0, Math.max(0, window.innerHeight - 60)),
-        }));
+        if (!drag.moved && Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) > 3) drag.moved = true;
+        if (!drag.moved) return;
+        const fitted = fit(event.clientX - drag.dx, event.clientY - drag.dy);
+        const previous = layoutRef.current.cards[drag.id] || { collapsed: false };
+        setLayout({ cards: { ...layoutRef.current.cards, [drag.id]: { ...previous, ...fitted } } });
       };
-      const ending = event => {
-        if (!dragRef.current) return;
+
+      const endDrag = event => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        dragRef.current = null;
         if (event.currentTarget.releasePointerCapture) {
           try {
             event.currentTarget.releasePointerCapture(event.pointerId);
@@ -528,102 +601,150 @@ window.__ModuleLoader__.load({
             // A cancelled pointer already released capture.
           }
         }
-        release();
+        saveLayout(layoutRef.current);
+        if (!drag.moved && drag.expandOnClick) patch(drag.id, { collapsed: false });
       };
 
-      // Keyboard equivalent of dragging: arrow keys move the stack in 16 px
-      // steps, Shift makes it 4 px for fine placement.
-      const moveKey = event => {
+      // Arrow keys nudge the focused card, Shift makes it a 4 px step.
+      const moveKey = (id, event) => {
         const step = event.shiftKey ? 4 : 16;
         const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
         if (!delta) return;
         event.preventDefault();
-        const rect = rootRef.current ? rootRef.current.getBoundingClientRect() : null;
-        const previous = layoutRef.current;
-        const baseX = previous.x === null ? (rect ? rect.left : 0) : previous.x;
-        const baseY = previous.y === null ? (rect ? rect.top : 72) : previous.y;
-        const next = {
-          ...previous,
-          x: clamp(baseX + delta[0], 0, Math.max(0, window.innerWidth - 140)),
-          y: clamp(baseY + delta[1], 0, Math.max(0, window.innerHeight - 60)),
-        };
-        setLayout(next);
-        saveLayout(next);
+        const element = slots.current.get(id);
+        const rect = element ? element.getBoundingClientRect() : null;
+        const entry = layoutRef.current.cards[id] || { x: null, y: null, collapsed: false };
+        const baseX = entry.x === null ? (rect ? rect.left : window.innerWidth - 360) : entry.x;
+        const baseY = entry.y === null ? (rect ? rect.top : ANCHOR_TOP) : entry.y;
+        patch(id, fit(baseX + delta[0], baseY + delta[1]));
       };
 
-      const top = visible[0];
-      const accent = ACCENTS[(top.attributes || {}).accent] || ACCENTS.brand;
-      const activeCount = visible.filter(activity => activity.status === 'active').length;
-
-      const toggle = () => {
-        const next = { ...layoutRef.current, collapsed: !layout.collapsed };
-        setLayout(next);
-        saveLayout(next);
-      };
-
-      if (layout.collapsed) {
-        return h(
-          'div',
-          { className: 'dla', style: anchorOf(layout), ref: rootRef },
-          h('style', null, CSS),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dla-pill',
-              onClick: toggle,
-              'aria-label': t('expand'),
-              title: t('expand'),
-              style: { '--accent': accent },
-            },
-            h('span', { className: 'dla-dot' }),
-            h('span', { className: 'dla-pill-label' }, top.state && top.state.phase ? top.state.phase : t('group')),
-            activeCount ? h('span', { className: 'dla-pill-count' }, t('count', { n: activeCount })) : null,
-          ),
-        );
+      if (!visible.length) {
+        return unavailable
+          ? h(
+              React.Fragment,
+              null,
+              h('style', null, CSS),
+              h(
+                'div',
+                { className: 'dla-slot', 'data-collapsed': 'true', style: { right: ANCHOR_RIGHT, top: ANCHOR_TOP } },
+                h(
+                  'div',
+                  { className: 'dla-error', role: 'status' },
+                  t('unavailable'),
+                  h('button', { type: 'button', onClick: () => setNoticeHidden(true) }, t('dismiss')),
+                ),
+              ),
+            )
+          : null;
       }
 
-      const shown = expanded ? visible : visible.slice(0, MAX_COLLAPSED);
-      const hidden = visible.length - shown.length;
-
+      let cursor = ANCHOR_TOP;
       return h(
-        'div',
-        { className: 'dla', style: anchorOf(layout), ref: rootRef, 'aria-label': t('group') },
+        React.Fragment,
+        null,
         h('style', null, CSS),
-        shown.map(activity =>
-          h(ActivityCard, {
-            key: activity.id,
+        visible.map(activity => {
+          const entry = layoutRef.current.cards[activity.id] || { x: null, y: null, collapsed: false };
+          const placed = entry.x !== null && entry.y !== null;
+          const top = placed ? entry.y : cursor;
+          if (!placed) cursor += (heights.current.get(activity.id) || 140) + CARD_GAP;
+          const shared = {
             activity,
             now,
             t,
             onDismiss: dismiss,
-            onDragStart: starting,
-            onDragMove: moving,
-            onDragEnd: ending,
-            onMoveKey: moveKey,
-          }),
-        ),
-        h(
-          'div',
-          { className: 'dla-actions' },
-          hidden > 0 ? h('button', { type: 'button', className: 'dla-more', onClick: () => setExpanded(true) }, t('more', { n: hidden })) : null,
-          expanded && visible.length > MAX_COLLAPSED ? h('button', { type: 'button', className: 'dla-more', onClick: () => setExpanded(false) }, t('less')) : null,
-          h(
-            'button',
-            { type: 'button', className: 'dla-more', onClick: toggle, 'aria-label': t('collapse'), title: t('collapse') },
-            h(
-              'svg',
-              { width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-              h('path', { d: 'm6 15 6-6 6 6' }),
-            ),
-          ),
-        ),
+            onExpand: () => patch(activity.id, { collapsed: false }),
+            onDragStart: event => startDrag(activity.id, event, { expandOnClick: entry.collapsed }),
+            onDragMove: moveDrag,
+            onDragEnd: endDrag,
+            onMoveKey: event => moveKey(activity.id, event),
+          };
+          return h(
+            'div',
+            {
+              key: activity.id,
+              className: 'dla-slot',
+              'data-collapsed': String(entry.collapsed),
+              'data-front': String(front === activity.id),
+              style: placed ? { left: entry.x, top } : { right: ANCHOR_RIGHT, top },
+              ref: element => {
+                if (element) slots.current.set(activity.id, element);
+                else slots.current.delete(activity.id);
+              },
+            },
+            entry.collapsed ? h(MiniCard, shared) : h(ActivityCard, { ...shared, onCollapse: () => patch(activity.id, { collapsed: true }) }),
+          );
+        }),
       );
     }
 
-    function anchorOf(layout) {
-      if (layout.x === null || layout.y === null) return { right: 20, top: 72 };
-      return { left: layout.x, top: layout.y };
+/** The collapsed form of one card: a pill that expands on click or Enter. */
+    function MiniCard({ activity, now, t, onDismiss, onExpand, onDragStart, onDragMove, onDragEnd, onMoveKey }) {
+      const attributes = activity.attributes || {};
+      const state = activity.state || {};
+      const accent = ACCENTS[attributes.accent] || ACCENTS.brand;
+      const ended = activity.status === 'ended';
+      const stale = !ended && activity.stale === true;
+      const progress = Number.isFinite(state.progress) ? clamp(state.progress, 0, 1) : null;
+      const counted = Number.isInteger(state.completed) && Number.isInteger(state.total);
+      const series = Array.isArray(state.metrics) ? state.metrics : [];
+      const last = series.length ? series[series.length - 1] : null;
+      const value = counted
+        ? t('counts', { done: state.completed, total: state.total })
+        : progress !== null
+          ? t('percent', { percent: Math.round(progress * 100) })
+          : last && Array.isArray(last.samples) && last.samples.length
+            ? formatNumber(last.samples[last.samples.length - 1].value) + (last.unit || '')
+            : null;
+      const hint = ended ? t('ended') : stale ? t('stale') : value;
+      return h(
+        'div',
+        {
+          className: 'dla-mini',
+          style: { '--accent': accent },
+          role: 'button',
+          tabIndex: 0,
+          'aria-label': t('expand'),
+          title: t('expand'),
+          'aria-expanded': false,
+          onPointerDown: onDragStart,
+          onPointerMove: onDragMove,
+          onPointerUp: onDragEnd,
+          onPointerCancel: onDragEnd,
+          onKeyDown: event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onExpand();
+              return;
+            }
+            onMoveKey(event);
+          },
+        },
+        h('span', { className: 'dla-dot' }),
+        h('span', { className: 'dla-mini-title' }, attributes.title),
+        h('span', { className: 'dla-mini-phase' }, state.phase),
+        hint ? h('span', { className: 'dla-mini-value', 'data-tone': ended ? undefined : stale ? 'warn' : undefined }, hint) : null,
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dla-mini-close',
+            'aria-label': t('dismiss'),
+            title: t('dismiss'),
+            onPointerDown: event => event.stopPropagation(),
+            onClick: event => {
+              event.stopPropagation();
+              onDismiss(activity.id);
+            },
+          },
+          h(
+            'svg',
+            { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', 'aria-hidden': true },
+            h('path', { d: 'm6 6 12 12M18 6 6 18' }),
+          ),
+        ),
+      );
     }
 
     return {
