@@ -24,6 +24,9 @@ window.__ModuleLoader__.load({
       removesIn: 'Removed in {left}',
       retained: 'Kept until {time}',
       progress: '{percent}% complete',
+      counts: '{done} / {total}',
+      seriesLatest: 'latest',
+      seriesRange: '{low} – {high}',
       dismiss: 'Dismiss this activity',
       collapse: 'Collapse live activities',
       expand: 'Expand live activities',
@@ -47,6 +50,9 @@ window.__ModuleLoader__.load({
       removesIn: '{left} 后移除',
       retained: '保留至 {time}',
       progress: '已完成 {percent}%',
+      counts: '{done} / {total}',
+      seriesLatest: '最新',
+      seriesRange: '{low} – {high}',
       dismiss: '移除这个实时活动',
       collapse: '收起实时活动',
       expand: '展开实时活动',
@@ -101,6 +107,14 @@ window.__ModuleLoader__.load({
       '.dla-chip[data-tone="warn"]{color:var(--dsw-alias-state-warn-primary)}',
       '.dla-chip[data-tone="success"]{color:var(--dsw-alias-state-success-primary)}',
       '.dla-foot{margin-top:7px;font-size:10.5px;color:var(--dsw-alias-label-secondary);opacity:.7;font-variant-numeric:tabular-nums}',
+      '.dla-series{margin-top:11px;display:flex;flex-direction:column;gap:7px}',
+      '.dla-series-row{display:flex;align-items:center;gap:8px;min-width:0}',
+      '.dla-series-name{flex:none;max-width:42%;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-series-chart{flex:1;min-width:0;height:26px;display:block;overflow:visible}',
+      '.dla-series-chart polyline{fill:none;stroke:var(--accent);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}',
+      '.dla-series-chart polygon{fill:var(--accent);opacity:.12;stroke:none}',
+      '.dla-series-chart circle{fill:var(--accent);stroke:none}',
+      '.dla-series-value{flex:none;font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}',
       '.dla-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;align-self:flex-end;max-width:100%;padding:8px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-overlay);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);box-shadow:0 10px 26px rgba(0,0,0,.16),0 1px 4px rgba(0,0,0,.06);cursor:pointer;font:inherit;font-size:12px;color:var(--dsw-alias-label-primary)}',
       '.dla-pill:hover{background:var(--dsw-alias-bg-layer-1)}',
       '.dla-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}',
@@ -218,6 +232,44 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function formatNumber(value) {
+      if (!Number.isFinite(value)) return '—';
+      const abs = Math.abs(value);
+      if (abs !== 0 && (abs >= 100000 || abs < 0.001)) return value.toExponential(1);
+      return String(parseFloat(value.toPrecision(3)));
+    }
+
+    /** One bounded sparkline per named series: the loss curve, throughput, latency. */
+    function SeriesChart({ series, t }) {
+      const samples = (series.samples || []).filter(sample => Number.isFinite(sample.value));
+      if (!samples.length) return null;
+      const width = 100;
+      const height = 26;
+      const pad = 2.5;
+      const low = Math.min(...samples.map(sample => sample.value));
+      const high = Math.max(...samples.map(sample => sample.value));
+      const span = high - low;
+      const x = index => (samples.length === 1 ? width - pad : pad + (index * (width - pad * 2)) / (samples.length - 1));
+      const y = value => (span === 0 ? height / 2 : pad + (1 - (value - low) / span) * (height - pad * 2));
+      const points = samples.map((sample, index) => `${x(index).toFixed(2)},${y(sample.value).toFixed(2)}`).join(' ');
+      const last = samples[samples.length - 1];
+      const label = `${series.name}: ${t('seriesLatest')} ${formatNumber(last.value)}${series.unit || ''} · ${t('seriesRange', { low: formatNumber(low), high: formatNumber(high) })}`;
+      return h(
+        'div',
+        { className: 'dla-series-row' },
+        h('span', { className: 'dla-series-name', title: series.name }, series.name),
+        h(
+          'svg',
+          { className: 'dla-series-chart', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': label },
+          h('title', null, label),
+          samples.length > 1 ? h('polygon', { points: `${points} ${x(samples.length - 1).toFixed(2)},${height - pad} ${x(0).toFixed(2)},${height - pad}` }) : null,
+          samples.length > 1 ? h('polyline', { points, vectorEffect: 'non-scaling-stroke' }) : null,
+          h('circle', { cx: x(samples.length - 1).toFixed(2), cy: y(last.value).toFixed(2), r: 1.7 }),
+        ),
+        h('span', { className: 'dla-series-value' }, formatNumber(last.value) + (series.unit || '')),
+      );
+    }
+
     function ActivityCard({ activity, now, t, onDismiss, onDragStart, onDragMove, onDragEnd, onMoveKey }) {
       const attributes = activity.attributes || {};
       const state = activity.state || {};
@@ -225,11 +277,15 @@ window.__ModuleLoader__.load({
       const ended = activity.status === 'ended';
       const stale = !ended && activity.stale === true;
       const progress = Number.isFinite(state.progress) ? clamp(state.progress, 0, 1) : null;
+      const counted = Number.isInteger(state.completed) && Number.isInteger(state.total);
+      const series = Array.isArray(state.metrics) ? state.metrics : [];
       const eta = Number.isFinite(state.etaEpochSeconds) ? state.etaEpochSeconds : null;
       const remaining = eta === null ? null : eta * 1000 - now;
       const dismissIn = ended && Number.isFinite(activity.dismissAt) ? activity.dismissAt - now : null;
 
       const chips = [];
+      if (counted) chips.push(h('span', { key: 'counts', className: 'dla-chip', 'data-tone': 'accent' }, t('counts', { done: state.completed, total: state.total })));
+      else if (progress !== null) chips.push(h('span', { key: 'percent', className: 'dla-chip', 'data-tone': 'accent' }, t('progress', { percent: Math.round(progress * 100) })));
       if (remaining !== null) {
         chips.push(
           h(
@@ -299,7 +355,8 @@ window.__ModuleLoader__.load({
           { className: 'dla-body' },
           h('div', { className: 'dla-phase', role: 'status' }, state.phase),
           state.detail ? h('div', { className: 'dla-detail' }, state.detail) : null,
-          progress !== null ? h('div', { className: 'dla-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(progress * 100), 'aria-label': t('progress', { percent: Math.round(progress * 100) }) }, h('i', { style: { width: (progress * 100).toFixed(1) + '%' } })) : null,
+          progress !== null ? h('div', { className: 'dla-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(progress * 100), 'aria-label': counted ? t('counts', { done: state.completed, total: state.total }) : t('progress', { percent: Math.round(progress * 100) }) }, h('i', { style: { width: (progress * 100).toFixed(1) + '%' } })) : null,
+          series.length ? h('div', { className: 'dla-series' }, series.map(item => h(SeriesChart, { key: item.name, series: item, t }))) : null,
           chips.length ? h('div', { className: 'dla-meta' }, chips) : null,
           h('div', { className: 'dla-foot' }, footer),
         ),

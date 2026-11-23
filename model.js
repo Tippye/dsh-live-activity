@@ -13,6 +13,17 @@ export const MAX_RECORDS = 32;
 export const MAX_ACTIVE = 8;
 export const STALE_MIN_SECONDS = 5;
 export const STALE_MAX_SECONDS = 86400;
+export const MAX_METRICS = 3;
+export const MAX_SAMPLES = 60;
+
+/**
+ * A card is only allowed while the work exposes something that actually changes:
+ * a determinate progress fraction (a tqdm-style countdown to completion) or at
+ * least one numeric series sampled over time (a loss curve, throughput, latency).
+ * Everything else belongs in the reply or in a durable board.
+ */
+export const GATE_MESSAGE =
+  'Live activity cards exist only for work that keeps reporting measurable progress: pass progress (0–1), or completed and total (a tqdm-style count), or at least one metrics sample (such as a training loss). A status-only update or an already finished step does not qualify — answer in the reply instead, or use dsh_board for a durable checklist.';
 
 const ACCENTS = ['brand', 'success', 'warn', 'error', 'idle'];
 const SYMBOLS = ['task', 'run', 'build', 'deploy', 'download', 'search', 'sync', 'alert'];
@@ -59,11 +70,56 @@ export function normalizeAttributes(input) {
   return attributes;
 }
 
+function integer(value, name, min, max) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    fail('INVALID_INPUT', `${name} must be an integer from ${min} to ${max}.`);
+  }
+  return value;
+}
+
+function unitOf(input) {
+  if (input.unit === undefined || input.unit === null) return {};
+  return { unit: string(input.unit, 'metrics.unit', 24) };
+}
+
+/**
+ * One sample per named series per call. A name seen before appends to that
+ * series, so a training loop reports `loss` repeatedly without resending the
+ * whole curve. History is bounded, oldest samples drop first.
+ */
+export function mergeMetrics(input, previous = [], now = Date.now()) {
+  if (input === null) return undefined;
+  if (!Array.isArray(input) || input.length === 0) fail('INVALID_INPUT', 'metrics must be a nonempty array of { name, value } samples, or null to clear.');
+  if (input.length > MAX_METRICS) fail('INVALID_INPUT', `metrics accepts at most ${MAX_METRICS} samples per call.`);
+  let metrics = (previous ?? []).map(series => ({ ...series, samples: [...series.samples] }));
+  const seen = new Set();
+  for (const sample of input) {
+    if (!sample || typeof sample !== 'object' || Array.isArray(sample)) fail('INVALID_INPUT', 'Each metrics entry must be an object.');
+    const name = string(sample.name, 'metrics.name', 40, { empty: false });
+    if (seen.has(name)) fail('INVALID_INPUT', `Duplicate metrics name in one call: ${name}`);
+    seen.add(name);
+    const value = finite(sample.value, `metrics.${name}`);
+    const unit = unitOf(sample);
+    const existing = metrics.find(series => series.name === name);
+    if (existing) {
+      existing.samples.push({ at: now, value });
+      if (unit.unit !== undefined) existing.unit = unit.unit;
+      if (existing.samples.length > MAX_SAMPLES) existing.samples = existing.samples.slice(-MAX_SAMPLES);
+    } else {
+      if (metrics.length >= MAX_METRICS) fail('INVALID_INPUT', `An activity tracks at most ${MAX_METRICS} series; clear metrics or start a new card.`);
+      metrics.push({ name, ...unit, samples: [{ at: now, value }] });
+    }
+  }
+  return metrics;
+}
+
 /**
  * Partial content-state merge. `undefined` keeps the previous value, `null`
  * clears it, and a value replaces it. `phase` is required on the first state.
+ * Counts (completed/total) derive the fraction, so a tqdm-style loop reports
+ * the numbers it already has.
  */
-export function normalizeState(input, previous) {
+export function normalizeState(input, previous, now = Date.now()) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail('INVALID_INPUT', 'The content state must be an object.');
   const phase = input.phase === undefined ? previous?.phase : string(input.phase, 'phase', 60, { empty: false });
   if (!phase) fail('INVALID_INPUT', 'phase is required.');
@@ -73,15 +129,32 @@ export function normalizeState(input, previous) {
   } else if (input.detail !== null) {
     state.detail = string(input.detail, 'detail', 400);
   }
-  if (input.progress !== undefined) {
-    if (input.progress !== null) {
-      const progress = finite(input.progress, 'progress');
-      if (progress < 0 || progress > 1) fail('INVALID_INPUT', 'progress must be between 0 and 1.');
-      state.progress = progress;
-    }
+
+  const clearsProgress = input.progress === null;
+  const total = clearsProgress ? undefined : input.total === undefined ? previous?.total : input.total;
+  const completed = clearsProgress ? undefined : input.completed === undefined ? previous?.completed : input.completed;
+  if (total !== undefined) {
+    if (!Number.isInteger(total) || total <= 0) fail('INVALID_INPUT', 'total must be a positive integer.');
+    state.total = total;
+  }
+  if (completed !== undefined) {
+    if (!Number.isInteger(completed) || completed < 0) fail('INVALID_INPUT', 'completed must be a nonnegative integer.');
+    state.completed = state.total === undefined ? completed : Math.min(completed, state.total);
+  }
+  if (clearsProgress) {
+    // progress: null clears the fraction and its counts together.
+  } else if (state.total !== undefined && state.completed !== undefined) {
+    state.progress = state.completed / state.total;
+  } else if (input.progress !== undefined) {
+    const progress = finite(input.progress, 'progress');
+    if (progress < 0 || progress > 1) fail('INVALID_INPUT', 'progress must be between 0 and 1.');
+    state.progress = progress;
   } else if (previous?.progress !== undefined) {
     state.progress = previous.progress;
+    if (previous.completed !== undefined) state.completed = previous.completed;
+    if (previous.total !== undefined) state.total = previous.total;
   }
+
   if (input.etaEpochSeconds !== undefined) {
     if (input.etaEpochSeconds !== null) {
       const eta = finite(input.etaEpochSeconds, 'etaEpochSeconds');
@@ -90,6 +163,51 @@ export function normalizeState(input, previous) {
     }
   } else if (previous?.etaEpochSeconds !== undefined) {
     state.etaEpochSeconds = previous.etaEpochSeconds;
+  }
+
+  if (input.metrics !== undefined) {
+    const metrics = mergeMetrics(input.metrics, previous?.metrics, now);
+    if (metrics) state.metrics = metrics;
+  } else if (previous?.metrics) {
+    state.metrics = previous.metrics;
+  }
+  return state;
+}
+
+/** Whether a state carries something worth watching over time. */
+export function tracksProgress(state) {
+  if (!state) return false;
+  if (state.progress !== undefined) return true;
+  return Array.isArray(state.metrics) && state.metrics.some(series => Array.isArray(series.samples) && series.samples.length > 0);
+}
+
+/** Stored records are validated strictly, and never gated: older cards still load. */
+function validateState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('INVALID_RECORD', 'Stored state is not an object.');
+  const state = { phase: string(value.phase, 'phase', 60, { empty: false }) };
+  if (value.detail !== undefined) state.detail = string(value.detail, 'detail', 400);
+  if (value.progress !== undefined) {
+    const progress = finite(value.progress, 'progress');
+    if (progress < 0 || progress > 1) fail('INVALID_RECORD', 'Stored progress is outside 0–1.');
+    state.progress = progress;
+  }
+  if (value.completed !== undefined) state.completed = integer(value.completed, 'completed', 0, Number.MAX_SAFE_INTEGER);
+  if (value.total !== undefined) state.total = integer(value.total, 'total', 1, Number.MAX_SAFE_INTEGER);
+  if (value.etaEpochSeconds !== undefined) state.etaEpochSeconds = integer(value.etaEpochSeconds, 'etaEpochSeconds', 1, Number.MAX_SAFE_INTEGER);
+  if (value.metrics !== undefined) {
+    if (!Array.isArray(value.metrics) || value.metrics.length > MAX_METRICS) fail('INVALID_RECORD', `Stored metrics must hold at most ${MAX_METRICS} series.`);
+    state.metrics = value.metrics.map(series => {
+      if (!series || typeof series !== 'object' || Array.isArray(series)) fail('INVALID_RECORD', 'Stored series is not an object.');
+      const samples = series.samples;
+      if (!Array.isArray(samples) || samples.length < 1 || samples.length > MAX_SAMPLES) fail('INVALID_RECORD', `Stored series must hold 1–${MAX_SAMPLES} samples.`);
+      const row = { name: string(series.name, 'metrics.name', 40, { empty: false }) };
+      if (series.unit !== undefined) row.unit = string(series.unit, 'metrics.unit', 24);
+      row.samples = samples.map(sample => {
+        if (!sample || typeof sample !== 'object' || Array.isArray(sample)) fail('INVALID_RECORD', 'Stored sample is not an object.');
+        return { at: finite(sample.at, 'at'), value: finite(sample.value, 'sample.value') };
+      });
+      return row;
+    });
   }
   return state;
 }
@@ -166,7 +284,7 @@ export function validateRecord(value) {
   const record = {
     id: string(value.id, 'id', 100, { empty: false }),
     attributes: normalizeAttributes(value.attributes),
-    state: normalizeState(value.state, null),
+    state: validateState(value.state),
     status: oneOf(value.status, 'status', STATUSES),
     staleAfterSeconds: normalizeStale(value.staleAfterSeconds, null),
     relevance: normalizeRelevance(value.relevance, 0),
@@ -221,13 +339,15 @@ export class LiveActivityStore {
   async mutate(input, ownerSessionId) {
     const now = this.now();
     if (input.action === 'create') {
+      const state = normalizeState(input, null, now);
+      if (!tracksProgress(state)) fail('NOT_PROGRESS_TRACKING', GATE_MESSAGE);
       const active = [...this.table.entries()].filter(([, record]) => record.status === 'active').length;
       if (active >= MAX_ACTIVE) fail('LIMIT_REACHED', `${MAX_ACTIVE} live activities are already active. End one with live_activity end before creating another.`);
       if (this.table.size >= MAX_RECORDS) fail('LIMIT_REACHED', `This profile already stores ${MAX_RECORDS} activity records. Dismiss or end old ones and retry.`);
       const record = {
         id: this.id(),
         attributes: normalizeAttributes(input),
-        state: normalizeState(input, null),
+        state,
         status: 'active',
         staleAfterSeconds: normalizeStale(input.staleAfterSeconds, null),
         relevance: normalizeRelevance(input.relevance, 0),
@@ -249,7 +369,19 @@ export class LiveActivityStore {
       fail('ENDED', `Live activity ${current.id} already ended at ${new Date(current.endedAt).toISOString()}.`);
     }
     const record = structuredClone(current);
-    record.state = normalizeState(input, current.state);
+    const state = normalizeState(input, current.state, now);
+    // A card that showed progress must not quietly become a status badge; an
+    // older card that never tracked anything can only be closed, not updated.
+    // `end` stays open so any card can always be shut down gracefully.
+    if (input.action !== 'end' && !tracksProgress(state)) {
+      fail(
+        'NOT_PROGRESS_TRACKING',
+        tracksProgress(current.state)
+          ? 'An update must keep the measurable progress or series this card was created with. To close the card, call end instead.'
+          : 'This card tracks neither progress nor a series, so it cannot be updated. Call end to close it.',
+      );
+    }
+    record.state = state;
     if (input.staleAfterSeconds !== undefined) record.staleAfterSeconds = normalizeStale(input.staleAfterSeconds, current.staleAfterSeconds);
     if (input.relevance !== undefined) record.relevance = normalizeRelevance(input.relevance, current.relevance);
     record.updatedAt = now;

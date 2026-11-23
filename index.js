@@ -9,7 +9,7 @@ const nullable = schema => ({ oneOf: [schema, { type: 'null' }] });
 export const toolSchema = {
   name: 'live_activity',
   description:
-    'Create, update and end live activity cards: small status windows that float over the DSH app while a long task runs, and keep showing phase, progress and an expected-finish countdown after the reply ends. Call create once, update on every real phase change, and end when the work finishes.',
+    'Floating progress cards for work that keeps reporting measurable progress: a determinate fraction or a tqdm-style count, or a numeric series sampled over time such as training loss, throughput or latency. Create is refused when neither exists, so a status-only task must be answered in the reply instead (use dsh_board for a durable checklist). Call create once, update as the numbers change, and end when the work finishes.',
   parameters: {
     type: 'object',
     properties: {
@@ -21,7 +21,24 @@ export const toolSchema = {
       accent: { type: 'string', enum: ['brand', 'success', 'warn', 'error', 'idle'], description: 'Tint of the glyph, progress bar and countdown; defaults to brand.' },
       phase: string('Short current state, for example "Building" or "Waiting for review" (max 60). Required on create.'),
       detail: nullable({ type: 'string', description: 'One or two clarifying sentences (max 400). Send null to clear it.' }),
-      progress: nullable({ type: 'number', description: 'Fraction complete from 0 to 1. Send null to hide the bar.' }),
+      progress: nullable({ type: 'number', description: 'Fraction complete from 0 to 1. Prefer completed and total when the work has a known count. Send null to hide the bar and clear its counts.' }),
+      completed: { type: 'integer', description: 'Items finished so far, for a tqdm-style bar such as step 120 of 500. Needs total to derive the fraction; a later update may send completed alone.' },
+      total: { type: 'integer', description: 'Total item count for the bar, greater than zero. Send it with completed.' },
+      metrics: nullable({
+        type: 'array',
+        maxItems: 3,
+        description: 'One sample per named series per call; a known name appends to that series, so a training loop reports { name: "loss", value: 0.42 } each epoch and the card draws the curve. Keeps the latest 60 samples per series; at most 3 series. Send null to clear every series.',
+        items: {
+          type: 'object',
+          properties: {
+            name: string('Series name, for example "loss" (max 40).'),
+            value: { type: 'number', description: 'Latest value of this series.' },
+            unit: string('Optional unit shown after the latest value, such as "%" or "ms".'),
+          },
+          required: ['name', 'value'],
+          additionalProperties: false,
+        },
+      }),
       etaEpochSeconds: nullable({ type: 'integer', description: 'Unix seconds when the work should finish. The card counts down locally, so no repeat updates are needed. Send null to hide it.' }),
       staleAfterSeconds: nullable({ type: 'integer', description: 'Seconds after the last update when the card starts marking itself as needing a refresh; 5 to 86400. Defaults to never.' }),
       relevance: { type: 'number', description: 'Ordering hint between -1000 and 1000; higher cards float above. Defaults to 0.' },
@@ -64,7 +81,8 @@ export async function apply(ctx) {
   ctx.systemPrompt.section({
     name: 'dsh-live-activity',
     order: 826,
-    text: 'Live activity cards: use the live_activity tool to show long-running work as floating status cards in the DSH window. Create one when a task will outlive the current reply (builds, deploys, test runs, multi-step jobs), update it at each real phase change with a short phase plus optional progress or etaEpochSeconds, and end it when the work finishes. The card counts down from etaEpochSeconds by itself, so do not update it just to tick a timer, and do not narrate progress the card already shows. Do not create a card for work that finishes in one tool call. Cards outlive the reply and are visible until the task ends; end a card you stop maintaining instead of leaving it to expire, and reuse the id from create in every later update or end. At most 8 cards can be active at once.',
+    text:
+      'Live activity cards are for work that keeps reporting measurable progress, nothing else. Create one only when the task exposes a determinate fraction or a tqdm-style count of steps, or a numeric series over time such as training loss, throughput, latency or memory. Supply that in the very first call: progress, or completed plus total, or a metrics sample — create is refused without one. Never create a card for a status-only narration, an already finished step, a decision, a single tool call, or work you can simply describe in the reply; use dsh_board when a durable checklist is what the user needs. While the card exists, drive it from real numbers: update completed as items finish, or send one metrics sample per new point, so the bar or curve moves on its own. Do not update just to tick a timer or to restate the phase text; the countdown from etaEpochSeconds runs locally. An update that drops the progress and the series is refused, so call end when the work is done rather than leaving a stale card. At most 8 cards may be active at once.',
   });
 
   // The floating card navigates the same store the agent writes: the page only
