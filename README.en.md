@@ -4,6 +4,10 @@ English · [简体中文](README.md)
 
 A DeepSeek Harness (DSH) plugin modelled on iOS Live Activities: an agent creates a floating status card for long-running work. The card floats above the DSH window, stays visible after the reply ends, and shows phase, progress and an expected-finish countdown.
 
+![A live activity card in the running app: progress, counts and two area charts](docs/card.png)
+
+Captured from a running DSH window: `94%` with `15 / 16` beside it, one area chart per series, and the fold/close controls each card carries in its header. Card content is written by the agent; interface labels follow your app language (this capture is the light theme with a Chinese UI).
+
 ## Install
 
 A DSH plugin is installed as a "bundle", and this repository is one:
