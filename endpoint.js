@@ -74,6 +74,18 @@ export async function readOrCreateToken(dir = endpointDir()) {
   return { token, file, created: true };
 }
 
+/**
+ * The endpoint cannot see a tunnel's far end: a forwarded connection arrives
+ * from loopback. A listener started for one tunnel therefore declares its
+ * source up front; everything else is attributed by its peer address.
+ */
+export function peerSource(request) {
+  const raw = String(request.socket?.remoteAddress ?? '');
+  const ip = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+  if (!ip || ip === '127.0.0.1' || ip === '::1') return { type: 'local' };
+  return { type: 'lan', ip };
+}
+
 function authorised(request, token) {
   const header = request.headers.authorization ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(String(header).trim());
@@ -122,7 +134,7 @@ function reply(response, status, payload) {
  * caller reports rather than swallowing: the URL a program uses must be real.
  */
 export async function startEndpoint(store, options = {}) {
-  const { host = DEFAULT_HOST, port = DEFAULT_PORT, config = {}, logger } = options;
+  const { host = DEFAULT_HOST, port = DEFAULT_PORT, config = {}, logger, source } = options;
   const endpointConfigured = config && typeof config === 'object' ? config : {};
   const desiredHost = typeof endpointConfigured.host === 'string' && endpointConfigured.host.trim()
     ? endpointConfigured.host.trim()
@@ -149,7 +161,7 @@ export async function startEndpoint(store, options = {}) {
           error: { code: 'INVALID_INPUT', message: `action must be one of ${ALLOWED_ACTIONS.join(', ')}.` },
         });
       }
-      const value = await store.run(input);
+      const value = await store.run(input, undefined, source ?? peerSource(request));
       return reply(response, 200, { ok: true, value });
     } catch (error) {
       const code = error.code ?? 'INVALID_REQUEST';
@@ -189,6 +201,7 @@ export async function startEndpoint(store, options = {}) {
     urls,
     host: desiredHost,
     port: actualPort,
+    source: source ?? null,
     tokenFile: file,
     dispose: () =>
       new Promise(resolve => {

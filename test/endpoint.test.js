@@ -79,6 +79,21 @@ test('the endpoint creates, updates and closes a card', async t => {
   assert.equal((await listed.json()).value.total, 0);
 });
 
+test('a listener started for a tunnel attributes calls to the machine behind it', async t => {
+  const tunnel = await startEndpoint(store, { port: 0, source: { type: 'tunnel', ip: '203.0.113.7', via: '127.0.0.1:41410' } });
+  t.after(() => tunnel.dispose());
+  const created = await post(tunnel, { action: 'create', title: 'Tunnelled card', phase: 'Working', progress: 0.1 });
+  const value = (await created.json()).value;
+  assert.equal(value.reporter.type, 'tunnel');
+  assert.equal(value.reporter.ip, '203.0.113.7');
+  assert.equal(value.reporter.via, '127.0.0.1:41410');
+
+  const plain = await startEndpoint(store, { port: 0 });
+  t.after(() => plain.dispose());
+  const local = await post(plain, { action: 'create', title: 'Local card', phase: 'Working', progress: 0.2 });
+  assert.equal((await local.json()).value.reporter.type, 'local', 'a loopback call is reported as local');
+});
+
 test('the progress gate and input validation apply over HTTP too', async t => {
   const endpoint = await startEndpoint(store, { port: 0 });
   t.after(() => endpoint.dispose());

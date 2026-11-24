@@ -218,6 +218,16 @@ Points worth knowing:
 - **A force-kill is the exception.** If DSH is `kill -9`ed or force quit,
   nothing can clean up and the ssh process may linger; finish with
   `pkill -f "ssh -N -R"`.
+- **A small badge after the title says who is reporting.** A card written through
+  a tunnel grows a signal icon next to its title; hovering it shows the machine
+  that actually sent the progress plus the forwarding port
+  (`183.147.142.103 · through the tunnel · 127.0.0.1:41410`). A card driven over
+  the LAN shows the same icon with "on the local network", while a local program
+  or the agent itself adds none. The badge also stays on the collapsed pill.
+  - Internally, each tunnel opens its own **private loopback listener** (random
+    port) as the `-R` target, because a forwarded request reaches the server
+    from `127.0.0.1`; only per-listener attribution can name the far machine.
+    That listener is closed with the tunnel.
 - The remote bind address must be pinned to IPv4 loopback: on the remote, sshd
   binds a `-R` port to `[::1]` by default, and dialing `127.0.0.1` then looks
   like "the tunnel is up but dead" — which is exactly what happened in the
@@ -230,6 +240,7 @@ Points worth knowing:
 - `client.js` — the independent floating cards in `shell.overlay`: 2 second polling, 1 second local countdown.
 - `endpoint.js` — the program-facing HTTP endpoint: token check, body limit, busy-port fallback, bind-address selection.
 - `tunnel.js` — reverse SSH tunnel argv construction and process supervision (spawned through `ctx.subprocess`, torn down with the instance).
+- The reporting source is stored on each card as `reporter` (`type`: `agent`/`local`/`lan`/`tunnel`, plus `ip`, `via`, `at`), refreshed on every write.
 - `bin/live-activity.mjs` — one-shot CLI that reads the token file and posts one request.
 - Records live in the profile's `dsh_live_activity` domain; a corrupt record is backed up and skipped instead of failing the whole plugin load.
 

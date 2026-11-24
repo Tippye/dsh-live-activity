@@ -134,14 +134,31 @@ export async function apply(ctx, config = {}) {
     }
     if (operation === 'stop') return tunnels.stop(args.tunnelId);
     if (operation !== 'start') throw new LiveActivityError('INVALID_INPUT', 'operation must be start, stop or list.');
-    const started = await tunnels.start({
-      host: args.host,
-      user: args.user,
-      sshPort: args.sshPort,
-      identityFile: args.identityFile,
-      remotePort: args.remotePort ?? endpoint.port,
-      localPort: endpoint.port,
+    const remotePort = args.remotePort ?? endpoint.port;
+    // One private loopback listener per tunnel: a forwarded call arrives from
+    // loopback, so this is the only place that knows which machine it came from.
+    const forwarder = await startEndpoint(store, {
+      host: '127.0.0.1',
+      port: 0,
+      config: {},
+      logger: ctx.logger,
+      source: { type: 'tunnel', ip: args.host, via: `127.0.0.1:${remotePort}` },
     });
+    let started;
+    try {
+      started = await tunnels.start({
+        host: args.host,
+        user: args.user,
+        sshPort: args.sshPort,
+        identityFile: args.identityFile,
+        remotePort,
+        localPort: forwarder.port,
+        dispose: forwarder.dispose,
+      });
+    } catch (error) {
+      await forwarder.dispose();
+      throw error;
+    }
     return {
       ...started,
       remoteUrl: `http://127.0.0.1:${started.remotePort}`,

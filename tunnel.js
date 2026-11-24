@@ -97,6 +97,10 @@ export function collectedText(handle, stream) {
   }
 }
 
+/**
+ * A tunnel owns a private loopback listener so every call through it can be
+ * attributed to the machine behind the forward; `dispose` closes that listener.
+ */
 export class TunnelRegistry {
   constructor({ spawn, resolveExecutable, cwd, logger, now = Date.now, id = randomUUID, startupWaitMs = 1200 }) {
     this.spawn = spawn;
@@ -111,7 +115,7 @@ export class TunnelRegistry {
   }
 
   view(record) {
-    const { handle, ...rest } = record;
+    const { handle, dispose, ...rest } = record;
     return { ...rest, output: collectedText(handle, 'stderr') };
   }
 
@@ -136,6 +140,7 @@ export class TunnelRegistry {
       sshPort: built.sshPort,
       remoteBind: built.remoteBind,
       argv: [executable, ...built.argv.slice(1)],
+      dispose: typeof request.dispose === 'function' ? request.dispose : null,
       startedAt: this.now(),
       state: 'running',
       handle,
@@ -173,6 +178,7 @@ export class TunnelRegistry {
     record.handle.terminate();
     await record.handle.waitForExit().catch(() => false);
     record.state = 'stopped';
+    if (record.dispose) await record.dispose().catch(() => {});
     return { id: record.id, stopped: true, target: record.target };
   }
 
@@ -186,6 +192,7 @@ export class TunnelRegistry {
     for (const record of records) {
       try {
         record.handle.terminate();
+        record.dispose?.();
       } catch (_) {
         // Already gone.
       }
@@ -200,6 +207,7 @@ export class TunnelRegistry {
       record.handle.terminate();
     }
     await Promise.all(records.map(record => record.handle.waitForExit().catch(() => false)));
+    await Promise.all(records.map(record => (record.dispose ? record.dispose().catch(() => {}) : undefined)));
     if (records.length && this.logger) this.logger.info('Live activity closed %d tunnel(s)', records.length);
   }
 }

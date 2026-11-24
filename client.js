@@ -45,6 +45,9 @@ window.__ModuleLoader__.load({
       allowTunnel: 'SSH tunnels',
       allowTunnelDesc: 'Let the agent open a reverse tunnel from a remote host back to this endpoint. Off by default; a tunnel opens a port on that host only, and closes with DSH.',
       tunnelCount: '{n} tunnel(s) active',
+      viaTunnel: 'through the tunnel',
+      viaLan: 'on the local network',
+      reporter: '{where} · {ip}',
       lanFailed: 'Could not read the endpoint settings.',
     };
     const zh = {
@@ -78,6 +81,9 @@ window.__ModuleLoader__.load({
       allowTunnel: 'SSH 隧道',
       allowTunnelDesc: '允许 agent 从远端主机反向开一条隧道指回本接口。默认关闭；隧道只在远端主机上开一个端口，随 DSH 关闭一起断开。',
       tunnelCount: '{n} 条隧道活动中',
+      viaTunnel: '经隧道',
+      viaLan: '局域网',
+      reporter: '{where} · {ip}',
       lanFailed: '无法读取接口设置。',
     };
 
@@ -112,7 +118,9 @@ window.__ModuleLoader__.load({
       '.dla-head:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:0}',
       '.dla-glyph{flex:none;margin-top:1px;color:var(--dsw-alias-label-secondary)}',
       '.dla-titles{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
-      '.dla-title{font-size:13px;font-weight:500;line-height:1.35;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-title-row{display:flex;align-items:center;gap:6px;min-width:0}',
+      '.dla-title{flex:1;min-width:0;font-size:13px;font-weight:500;line-height:1.35;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.dla-net{flex:none;display:flex;align-items:center;color:var(--accent);opacity:.75}',
       '.dla-sub{font-size:11px;line-height:1.35;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '.dla-head-actions{flex:none;display:flex;align-items:center;gap:2px}',
       '.dla-icon-btn{display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:.6}',
@@ -269,6 +277,24 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /** Marks a card whose progress comes from another machine. */
+    function NetBadge({ reporter, t }) {
+      if (!reporter || !reporter.ip) return null;
+      const where = reporter.type === 'tunnel' ? t('viaTunnel') : t('viaLan');
+      const label = t('reporter', { where, ip: reporter.ip });
+      return h(
+        'span',
+        { className: 'dla-net', title: label, 'aria-label': label, role: 'img' },
+        h(
+          'svg',
+          { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': true },
+          h('path', { d: 'M4 10a11 11 0 0 1 16 0' }),
+          h('path', { d: 'M7.5 14a7 7 0 0 1 9 0' }),
+          h('circle', { cx: 12, cy: 18, r: 1.6, fill: 'currentColor', stroke: 'none' }),
+        ),
+      );
+    }
+
     function formatNumber(value) {
       if (!Number.isFinite(value)) return '—';
       const abs = Math.abs(value);
@@ -396,7 +422,12 @@ window.__ModuleLoader__.load({
           h(
             'span',
             { className: 'dla-titles' },
-            h('span', { className: 'dla-title' }, attributes.title),
+            h(
+              'span',
+              { className: 'dla-title-row' },
+              h('span', { className: 'dla-title' }, attributes.title),
+              h(NetBadge, { reporter: activity.reporter, t }),
+            ),
             attributes.subtitle ? h('span', { className: 'dla-sub' }, attributes.subtitle) : null,
           ),
           h(
@@ -839,6 +870,7 @@ window.__ModuleLoader__.load({
         },
         h('span', { className: 'dla-dot' }),
         h('span', { className: 'dla-mini-title' }, attributes.title),
+        h(NetBadge, { reporter: activity.reporter, t }),
         h('span', { className: 'dla-mini-phase' }, state.phase),
         hint ? h('span', { className: 'dla-mini-value', 'data-tone': ended ? undefined : stale ? 'warn' : undefined }, hint) : null,
         h(

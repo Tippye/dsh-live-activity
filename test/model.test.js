@@ -107,6 +107,20 @@ const closed = await store.run({ action: 'end', id: 'legacy', phase: 'Closed' })
 assert(closed.status === 'ended', 'a legacy card can still be ended');
 await store.run({ action: 'dismiss', id: 'legacy' });
 
+// ---- who reported the numbers ----
+
+const fromLan = await store.run({ action: 'create', title: 'From the LAN', phase: 'Working', progress: 0.1 }, 'session-x', { type: 'lan', ip: '192.168.100.9' });
+assert(fromLan.reporter.type === 'lan' && fromLan.reporter.ip === '192.168.100.9', 'a LAN caller is recorded with its address');
+assert(Number.isFinite(fromLan.reporter.at), 'the report carries a timestamp');
+
+const fromTunnel = await store.run({ action: 'update', id: fromLan.id, phase: 'Through the tunnel', progress: 0.4 }, undefined, { type: 'tunnel', ip: '183.147.142.103', via: '127.0.0.1:41410' });
+assert(fromTunnel.reporter.type === 'tunnel' && fromTunnel.reporter.ip === '183.147.142.103', 'a tunnelled caller keeps the far-end address');
+assert(fromTunnel.reporter.via === '127.0.0.1:41410', 'the forwarding port is kept as context');
+
+const byAgent = await store.run({ action: 'update', id: fromLan.id, phase: 'Agent took over', progress: 0.6 });
+assert(byAgent.reporter.type === 'agent' && byAgent.reporter.ip === undefined, 'an agent update clears the remote address');
+await store.run({ action: 'dismiss', id: fromLan.id });
+
 // ---- limits and listing ----
 
 await store.run({ action: 'end', id: lossy.id, phase: 'Trained' });

@@ -266,6 +266,21 @@ function alive(record, now) {
  * deadlines the system derives from it, exactly like ActivityKit's `staleDate`
  * and dismissal policy.
  */
+/**
+ * Who last wrote a card. `agent` is the tool, `local` is a program on this
+ * machine, `lan` is another machine dialing the endpoint directly, and `tunnel`
+ * is a machine reached through a reverse forward (which is why the peer address
+ * cannot be used for the last one: it is always loopback).
+ */
+export function normalizeSource(source) {
+  if (!source || typeof source !== 'object') return { type: 'agent' };
+  const type = ['agent', 'local', 'lan', 'tunnel'].includes(source.type) ? source.type : 'agent';
+  const row = { type };
+  if (typeof source.ip === 'string' && source.ip.trim()) row.ip = source.ip.trim().slice(0, 64);
+  if (typeof source.via === 'string' && source.via.trim()) row.via = source.via.trim().slice(0, 64);
+  return row;
+}
+
 export function snapshot(record, now = Date.now()) {
   const value = structuredClone(record);
   value.stale = record.status === 'active' && record.staleAfterSeconds != null && now > record.updatedAt + record.staleAfterSeconds * 1000;
@@ -294,6 +309,11 @@ export function validateRecord(value) {
   if (value.endedAt !== undefined) record.endedAt = finite(value.endedAt, 'endedAt');
   if (value.dismissalPolicy !== undefined) record.dismissalPolicy = normalizeDismissal(value.dismissalPolicy);
   if (value.ownerSessionId !== undefined) record.ownerSessionId = string(value.ownerSessionId, 'ownerSessionId', 100, { empty: false });
+  if (value.reporter !== undefined) {
+    const reporter = normalizeSource(value.reporter);
+    if (Number.isFinite(value.reporter?.at)) reporter.at = value.reporter.at;
+    record.reporter = reporter;
+  }
   if (record.status === 'ended' && record.endedAt === undefined) record.endedAt = record.updatedAt;
   return record;
 }
@@ -327,16 +347,16 @@ export class LiveActivityStore {
     return snapshot(record, this.now());
   }
 
-  async run(input, ownerSessionId) {
+  async run(input, ownerSessionId, source) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail('INVALID_INPUT', 'Operation must be an object.');
     if (input.action === 'list') return this.list(input);
     if (input.action === 'get') return this.get(input.id);
-    const operation = this.tail.then(() => this.mutate(input, ownerSessionId));
+    const operation = this.tail.then(() => this.mutate(input, ownerSessionId, source));
     this.tail = operation.catch(() => {});
     return operation;
   }
 
-  async mutate(input, ownerSessionId) {
+  async mutate(input, ownerSessionId, source) {
     const now = this.now();
     if (input.action === 'create') {
       const state = normalizeState(input, null, now);
@@ -351,6 +371,7 @@ export class LiveActivityStore {
         status: 'active',
         staleAfterSeconds: normalizeStale(input.staleAfterSeconds, null),
         relevance: normalizeRelevance(input.relevance, 0),
+        reporter: { ...normalizeSource(source), at: now },
         startedAt: now,
         updatedAt: now,
         ...(ownerSessionId ? { ownerSessionId } : {}),
@@ -385,6 +406,7 @@ export class LiveActivityStore {
     if (input.staleAfterSeconds !== undefined) record.staleAfterSeconds = normalizeStale(input.staleAfterSeconds, current.staleAfterSeconds);
     if (input.relevance !== undefined) record.relevance = normalizeRelevance(input.relevance, current.relevance);
     record.updatedAt = now;
+    record.reporter = { ...normalizeSource(source), at: now };
     if (input.action === 'end') {
       record.status = 'ended';
       record.endedAt = now;
