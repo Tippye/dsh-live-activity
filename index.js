@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LiveActivityError, LiveActivityStore, validateRecord } from './model.js';
+import { startEndpoint } from './endpoint.js';
 
 export const inject = ['storageDomain', 'tools', 'connection', 'systemPrompt', 'timer'];
 
@@ -13,7 +14,7 @@ export const toolSchema = {
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['create', 'update', 'end', 'dismiss', 'list', 'get'] },
+      action: { type: 'string', enum: ['create', 'update', 'end', 'dismiss', 'list', 'get', 'endpoint'] },
       id: string('Activity id returned by create; required for update, end, get and dismiss.'),
       title: string('Card title, set once on create and never changed afterwards (max 80).'),
       subtitle: string('Optional small line above the phase, such as the project or the target host (max 120).'),
@@ -59,7 +60,7 @@ export const toolSchema = {
 
 const resultBlocks = value => [{ type: 'text', text: JSON.stringify(value) }];
 
-export async function apply(ctx) {
+export async function apply(ctx, config = {}) {
   const domain = await ctx.storageDomain.open({
     name: 'dsh_live_activity',
     version: 1,
@@ -70,19 +71,33 @@ export async function apply(ctx) {
   ctx.effect(() => () => domain.close());
   const store = new LiveActivityStore(domain.table('activities'));
 
+  // A program can drive a card on its own through this endpoint; the token file
+  // is the handoff, and the same progress gate applies to every call.
+  const endpoint = await startEndpoint(store, { config, logger: ctx.logger });
+
   ctx.tools.register({
     ...toolSchema,
     output: { schema: {}, render: (_args, value) => resultBlocks(value) },
-    isConcurrencySafe: args => args?.action === 'get' || args?.action === 'list',
-    execute: (args, exec) => store.run(args, exec.agent?.id),
-    presentCall: args => ({ card: 'generic', title: `Live activity · ${args.action}`, kind: ['get', 'list'].includes(args.action) ? 'read' : 'edit' }),
+    isConcurrencySafe: args => ['get', 'list', 'endpoint'].includes(args?.action),
+    execute: (args, exec) =>
+      args?.action === 'endpoint'
+        ? {
+            url: endpoint.url,
+            host: endpoint.host,
+            port: endpoint.port,
+            tokenFile: endpoint.tokenFile,
+            usage: 'POST JSON with the same operations this tool accepts, and send "Authorization: Bearer <token>" where <token> is the content of tokenFile. Bind another interface by setting the plugin config host (for example "0.0.0.0") when a program on another machine must reach it.',
+          }
+        : store.run(args, exec.agent?.id),
+    presentCall: args => ({ card: 'generic', title: `Live activity · ${args.action}`, kind: ['get', 'list', 'endpoint'].includes(args.action) ? 'read' : 'edit' }),
   });
+  ctx.effect(() => endpoint.dispose);
 
   ctx.systemPrompt.section({
     name: 'dsh-live-activity',
     order: 826,
     text:
-      'Live activity cards are for work that keeps reporting measurable progress, nothing else. Create one only when the task exposes a determinate fraction or a tqdm-style count of steps, or a numeric series over time such as training loss, throughput, latency or memory. Supply that in the very first call: progress, or completed plus total, or a metrics sample — create is refused without one. Never create a card for a status-only narration, an already finished step, a decision, a single tool call, or work you can simply describe in the reply; use dsh_board when a durable checklist is what the user needs. While the card exists, drive it from real numbers: update completed as items finish, or send one metrics sample per new point, so the bar or curve moves on its own. Do not update just to tick a timer or to restate the phase text; the countdown from etaEpochSeconds runs locally. An update that drops the progress and the series is refused, so call end when the work is done rather than leaving a stale card. At most 8 cards may be active at once.',
+      'Live activity cards are for work that keeps reporting measurable progress, nothing else. Create one only when the task exposes a determinate fraction or a tqdm-style count of steps, or a numeric series over time such as training loss, throughput, latency or memory. Supply that in the very first call: progress, or completed plus total, or a metrics sample — create is refused without one. Never create a card for a status-only narration, an already finished step, a decision, a single tool call, or work you can simply describe in the reply; use dsh_board when a durable checklist is what the user needs. While the card exists, drive it from real numbers: update completed as items finish, or send one metrics sample per new point, so the bar or curve moves on its own. Do not update just to tick a timer or to restate the phase text; the countdown from etaEpochSeconds runs locally. An update that drops the progress and the series is refused, so call end when the work is done rather than leaving a stale card. At most 8 cards may be active at once. When the user\'s own script, a build job or a device should report progress without you relaying it, call this tool with action "endpoint": it returns a local HTTP API URL and the token file that authorises it, and the same operations and gate apply there.',
   });
 
   // The floating card navigates the same store the agent writes: the page only

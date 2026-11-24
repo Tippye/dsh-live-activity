@@ -112,11 +112,78 @@ Each card keeps its own position and collapsed state in local storage under its 
 - `dismissalPolicy`: `"default"` keeps the final state for 10 minutes, `"immediate"` removes it at once, `{"afterSeconds":n}` keeps it for a custom 1–14400 seconds.
 - At most 8 cards are active at once; end an old one first.
 
+## Driven by a program (HTTP endpoint)
+
+Progress does not have to go through the agent: the plugin serves a local HTTP
+endpoint on `127.0.0.1:41363`, and `action: "endpoint"` returns its URL and the
+token file that authorises it. The same operations and the same gate apply, so a
+status-only card is still refused there (422).
+
+```sh
+# the token file: 0600, created on first start, stable across restarts
+cat ~/.dsh/plugin-data/dsh-live-activity/token
+
+# the CLI from this repo reads it for you
+node bin/live-activity.mjs '{"action":"create","title":"Train","phase":"Epoch 1","completed":1,"total":16}'
+node bin/live-activity.mjs '{"action":"update","id":"<id>","completed":7,"metrics":[{"name":"loss","value":0.42}]}'
+
+# or plain curl
+curl -s http://127.0.0.1:41363 \
+  -H "Authorization: Bearer $(cat ~/.dsh/plugin-data/dsh-live-activity/token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"update","id":"<id>","completed":9,"total":16}'
+```
+
+Python's standard library is enough:
+
+```python
+import json, pathlib, urllib.request
+token = pathlib.Path('~/.dsh/plugin-data/dsh-live-activity/token').expanduser().read_text().strip()
+def call(payload):
+    req = urllib.request.Request('http://127.0.0.1:41363', data=json.dumps(payload).encode(),
+        headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+    return json.loads(urllib.request.urlopen(req, timeout=5).read())['value']
+
+card = call({'action': 'create', 'title': 'Train', 'phase': 'Epoch 1', 'completed': 0, 'total': 16})
+for epoch in range(16):
+    call({'action': 'update', 'id': card['id'], 'completed': epoch + 1, 'metrics': [{'name': 'loss', 'value': 2.0 / (epoch + 1)}]})
+call({'action': 'end', 'id': card['id'], 'phase': 'Training finished'})
+```
+
+The endpoint accepts `POST` only; a missing token answers 401, a body over 64 KiB
+answers 413, and an unknown action answers 400.
+
+### Other machines (a training server, a robot)
+
+It listens on loopback by default, so **another machine cannot reach it**. Two
+options:
+
+- **Tunnel it (recommended)**: open an SSH tunnel from the remote host, which
+  forwards that host's port to this machine's endpoint
+  ```sh
+  ssh -N -L 41363:127.0.0.1:41363 <you>@<the machine running DSH>
+  ```
+  The remote script keeps posting to `http://127.0.0.1:41363`; nothing is
+  exposed on the LAN and no plugin config changes.
+- **Listen on the LAN**: add a `config` to this row in the profile's
+  `cordis.patch.yml`:
+  ```yaml
+  - id: dsh-live-activity
+    name: '@local/dsh-live-activity'
+    config: { host: '0.0.0.0' }
+  ```
+  After a restart, devices on the same network can use
+  `http://<this-host-ip>:41363` (macOS may ask about the firewall). In that mode
+  the token is the only defence and the traffic is plain HTTP, so keep it to a
+  network you trust.
+
 ## Where things are
 
 - `index.js` — tool registration, the read-only `/api/dsh-live-activity` route (the page may only list/get/dismiss), the system prompt section, and a 15 second expiry sweep.
 - `model.js` — validation, state merging, lifecycle derivation (`stale`, `expiresAt`, `dismissAt`) and the store.
-- `client.js` — the floating card stack in `shell.overlay`: 2 second polling, 1 second local countdown.
+- `client.js` — the independent floating cards in `shell.overlay`: 2 second polling, 1 second local countdown.
+- `endpoint.js` — the program-facing HTTP endpoint: token check, body limit, busy-port fallback.
+- `bin/live-activity.mjs` — one-shot CLI that reads the token file and posts one request.
 - Records live in the profile's `dsh_live_activity` domain; a corrupt record is backed up and skipped instead of failing the whole plugin load.
 
 ## Known limits
@@ -124,12 +191,13 @@ Each card keeps its own position and collapsed state in local storage under its 
 - Cards are visible only while the DSH window is on screen; minimising it hides them. This is not a system desktop widget.
 - Only the agent writes card content; the UI cannot edit phase or progress, only remove a card.
 - Polling is 2 seconds, so an agent update reaches the card within about 2 seconds. The countdown does not depend on polling.
-- A card must be created by the agent through the tool; there is no manual "new card" control in the UI.
+- A card is created by the agent through the tool or by a program through the HTTP endpoint; there is no manual "new card" control in the UI.
+- The HTTP endpoint listens on loopback by default, needs an SSH tunnel or an explicit config change for other machines, and speaks plain HTTP with no TLS.
 - The curve on a card is a small built-in sparkline, not a full chart; for axes, legends and multi-series interaction use an ECharts chart on a `dsh_board`.
 
 ## Privacy
 
-Card content stays in your local profile storage and is never sent to a third-party service. The only traffic between the page and the Host is a same-origin `POST /api/dsh-live-activity`, restricted to `list`, `get` and `dismiss`; only the agent can write.
+Card content stays in your local profile storage and the plugin makes no outbound requests. Between the page and the Host there is only a same-origin `POST /api/dsh-live-activity`, restricted to `list`, `get` and `dismiss`; writes have two legitimate paths — the agent tool, and the token-protected local HTTP endpoint (`endpoint.js`). The token lives in `~/.dsh/plugin-data/dsh-live-activity/token` (mode 0600).
 
 ## Development
 

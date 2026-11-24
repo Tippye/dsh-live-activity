@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-live-activity",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "Live activity cards: floating status windows an agent creates, updates and ends for long-running work.",
@@ -33,8 +33,10 @@
     "model.js",
     "client.js",
     "cordis.patch.yml",
+    "endpoint.js",
     "locale/*.json",
     "icon.svg",
+    "bin",
     "test",
     "docs",
     "README.md",
@@ -44,7 +46,7 @@
     "zod": "^4.0.0"
   },
   "scripts": {
-    "test": "node test/model.test.js"
+    "test": "node test/model.test.js && node --test test/endpoint.test.js"
   },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
@@ -53,5 +55,8 @@
       "immediately": true,
       "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
     }
+  },
+  "bin": {
+    "live-activity": "./bin/live-activity.mjs"
   }
 }

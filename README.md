@@ -110,11 +110,67 @@ iOS 实时活动由系统托管，App 进后台甚至被挂起后卡片仍由 iO
 - `dismissalPolicy`：`"default"` 结束后保留 10 分钟，`"immediate"` 立刻消失，`{"afterSeconds":n}` 自定义（1–14400 秒）。
 - 同一时刻最多 8 张活动卡片，超过时先 `end` 旧卡片。
 
+## 程序驱动进度（HTTP 接口）
+
+进度不必经 agent 中转：插件在 `127.0.0.1:41363` 起了一个本机 HTTP 接口，`action: "endpoint"` 会告诉你地址和令牌文件，同一套操作与门禁都适用（状态类卡片照样 422）。
+
+```sh
+# 令牌文件（0600，首次启动自动生成，重启不变）
+cat ~/.dsh/plugin-data/dsh-live-activity/token
+
+# 用仓库自带的 CLI，令牌自动读取
+node bin/live-activity.mjs '{"action":"create","title":"训练","phase":"Epoch 1","completed":1,"total":16}'
+node bin/live-activity.mjs '{"action":"update","id":"<id>","completed":7,"metrics":[{"name":"loss","value":0.42}]}'
+
+# 或者直接用 curl
+curl -s http://127.0.0.1:41363 \
+  -H "Authorization: Bearer $(cat ~/.dsh/plugin-data/dsh-live-activity/token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"update","id":"<id>","completed":9,"total":16}'
+```
+
+Python 标准库就够（不用装依赖）：
+
+```python
+import json, pathlib, urllib.request
+token = pathlib.Path('~/.dsh/plugin-data/dsh-live-activity/token').expanduser().read_text().strip()
+def call(payload):
+    req = urllib.request.Request('http://127.0.0.1:41363', data=json.dumps(payload).encode(),
+        headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+    return json.loads(urllib.request.urlopen(req, timeout=5).read())['value']
+
+card = call({'action': 'create', 'title': '训练', 'phase': 'Epoch 1', 'completed': 0, 'total': 16})
+for epoch in range(16):
+    call({'action': 'update', 'id': card['id'], 'completed': epoch + 1, 'metrics': [{'name': 'loss', 'value': 2.0 / (epoch + 1)}]})
+call({'action': 'end', 'id': card['id'], 'phase': '训练完成'})
+```
+
+接口只接受 `POST`，未带令牌返回 401，超过 64 KiB 返回 413，未知 action 返回 400。
+
+### 跨设备（训练服务器、机器人等）
+
+默认只监听回环地址，**其他机器连不上**。两种做法：
+
+- **不开放监听面（推荐）**：在远端机器上建一条 SSH 隧道，把本机端口映射过去
+  ```sh
+  ssh -N -L 41363:127.0.0.1:41363 <你的用户名>@<运行 DSH 的机器>
+  ```
+  远端脚本照旧请求 `http://127.0.0.1:41363`，请求会穿隧道回到 DSH，不需要改插件配置，也不需要局域网暴露端口。
+- **直接监听局域网**：在 profile 的 `cordis.patch.yml` 里给这一行加 `config`：
+  ```yaml
+  - id: dsh-live-activity
+    name: '@local/dsh-live-activity'
+    config: { host: '0.0.0.0' }
+  ```
+  重启后同一局域网内的设备可用 `http://<本机 IP>:41363` 直连（macOS 防火墙可能询问是否允许）。此模式下令牌是唯一防线，且流量是明文 HTTP —— 只在可信内网用。
+
 ## 实现位置
 
 - `index.js`：工具注册、`/api/dsh-live-activity` 只读路由（页面只能 list/get/dismiss）、系统提示词、每 15 秒的过期清理。
 - `model.js`：校验、状态合并、生命周期推导（`stale`、`expiresAt`、`dismissAt`）、store。
-- `client.js`：`shell.overlay` 里的悬浮卡片栈，2 秒轮询、1 秒本地倒计时。
+- `client.js`：`shell.overlay` 里的独立悬浮卡片，2 秒轮询、1 秒本地倒计时。
+- `endpoint.js`：程序侧 HTTP 接口（令牌校验、请求体上限、端口占用回落）。
+- `bin/live-activity.mjs`：读令牌文件、发一次请求的命令行小工具。
 - 数据存在 profile 的 `dsh_live_activity` domain 里；损坏的记录会被备份并跳过，不会让插件整体加载失败。
 
 ## 已知限制
@@ -122,12 +178,13 @@ iOS 实时活动由系统托管，App 进后台甚至被挂起后卡片仍由 iO
 - 卡片只在 DSH 窗口可见范围内显示，窗口最小化时看不到；这不是系统级桌面挂件。
 - 卡片内容只由 agent 写，界面里不能编辑阶段或进度（只能移除）。
 - 轮询间隔 2 秒，agent 更新到卡片刷新最多有约 2 秒延迟；倒计时不依赖轮询。
-- 卡片必须由 agent 调用工具创建；界面里没有「手动新建卡片」入口。
+- 卡片必须由 agent（通过工具）或程序（通过 HTTP 接口）创建；界面里没有「手动新建卡片」入口。
+- HTTP 接口默认只在回环地址上监听，跨设备需要 SSH 隧道或显式改配置；接口是明文 HTTP，没有 TLS。
 - 卡片上的曲线是自带的小折线图（sparkline），不是完整图表；需要坐标轴、图例、多序列交互的图请用 `dsh_board` 的 ECharts 图表。
 
 ## 隐私
 
-卡片内容存在本机 profile 的存储里，不发送到任何第三方服务。界面与 Host 之间的通信只有同源的 `POST /api/dsh-live-activity`，且只允许 `list`、`get`、`dismiss`，agent 侧才能写入。
+卡片内容存在本机 profile 的存储里，插件本身不向任何外部服务发起请求。页面与 Host 之间只有同源的 `POST /api/dsh-live-activity`，且只允许 `list`、`get`、`dismiss`；写入有两条合法路径——agent 的工具，以及本机那个需要令牌的 HTTP 接口（`endpoint.js`）。令牌保存在 `~/.dsh/plugin-data/dsh-live-activity/token`（0600）。
 
 ## 开发
 
