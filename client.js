@@ -35,6 +35,14 @@ window.__ModuleLoader__.load({
       expand: 'Expand this activity',
       unavailable: 'Live activities are unavailable',
       dragHint: 'Drag to move',
+      lanAccess: 'LAN access',
+      lanAccessDesc: 'Let other machines on your local network drive cards over the HTTP endpoint. Off by default; when it is on, the bearer token is the only gate and traffic is plain HTTP.',
+      lanOn: 'On',
+      lanOff: 'Off',
+      lanEndpoint: 'Listening on {url}',
+      lanToken: 'Token file',
+      lanSaved: 'Saved. The listener has rebound.',
+      lanFailed: 'Could not read the endpoint settings.',
     };
     const zh = {
       refreshedJustNow: '刚刚更新',
@@ -57,6 +65,14 @@ window.__ModuleLoader__.load({
       expand: '展开这张卡片',
       unavailable: '实时活动暂不可用',
       dragHint: '拖动可移动',
+      lanAccess: '局域网访问',
+      lanAccessDesc: '允许局域网内其他设备通过 HTTP 接口驱动卡片。默认关闭；开启后访问令牌是唯一防线，且流量为明文 HTTP。',
+      lanOn: '已开启',
+      lanOff: '已关闭',
+      lanEndpoint: '监听地址 {url}',
+      lanToken: '令牌文件',
+      lanSaved: '已保存，监听地址已切换。',
+      lanFailed: '无法读取接口设置。',
     };
 
     const ACCENTS = {
@@ -458,6 +474,92 @@ window.__ModuleLoader__.load({
       );
     }
 
+
+    const SETTINGS_CSS = [
+      '.dlas{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);font:inherit;color:var(--dsw-alias-label-primary)}',
+      '.dlas *{box-sizing:border-box}',
+      '.dlas-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}',
+      '.dlas-title{font-size:13px;font-weight:500;line-height:1.4}',
+      '.dlas-desc{margin-top:2px;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary)}',
+      '.dlas-switch{flex:none;position:relative;width:36px;height:20px;margin-top:1px;padding:0;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-2);cursor:pointer;transition:background .2s ease,border-color .2s ease}',
+      '.dlas-switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}',
+      '.dlas-switch>i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-bg-base);transition:transform .2s cubic-bezier(.4,0,.2,1)}',
+      '.dlas-switch[aria-checked="true"]>i{transform:translateX(16px)}',
+      '.dlas-switch:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}',
+      '.dlas-switch:disabled{opacity:.5;cursor:default}',
+      '.dlas-meta{font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}',
+      '.dlas-warn{font-size:11px;line-height:1.5;color:var(--dsw-alias-state-warn-primary)}',
+    ].join('');
+
+    /** The bundle's own settings: the only switch that widens the listener. */
+    function PluginSettings(props) {
+      const t = props.t;
+      const [state, setState] = useState({ value: null, error: null, busy: false });
+      const [saved, setSaved] = useState(false);
+      const load = useCallback(async () => {
+        try {
+          const value = await api({ action: 'settings' });
+          setState(previous => ({ ...previous, value, error: null }));
+        } catch (error) {
+          setState(previous => ({ ...previous, error }));
+        }
+      }, []);
+      useEffect(() => {
+        load();
+      }, [load]);
+      const enabled = state.value ? state.value.lanAccess === true : false;
+      const toggle = async () => {
+        const next = !enabled;
+        setState(previous => ({ ...previous, busy: true, error: null }));
+        setSaved(false);
+        try {
+          await api({ action: 'set-lan-access', enabled: next });
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          await load();
+          setSaved(true);
+        } catch (error) {
+          setState(previous => ({ ...previous, error }));
+        } finally {
+          setState(previous => ({ ...previous, busy: false }));
+        }
+      };
+      if (props.view === 'summary') {
+        return h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, t('lanAccess'), ' · ', enabled ? t('lanOn') : t('lanOff'));
+      }
+      return h(
+        'div',
+        { className: 'dlas' },
+        h('style', null, SETTINGS_CSS),
+        h(
+          'div',
+          { className: 'dlas-row' },
+          h(
+            'div',
+            null,
+            h('div', { className: 'dlas-title' }, t('lanAccess'), ' · ', h('span', { className: 'dlas-meta' }, enabled ? t('lanOn') : t('lanOff'))),
+            h('div', { className: 'dlas-desc' }, t('lanAccessDesc')),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dlas-switch',
+              role: 'switch',
+              'aria-checked': enabled,
+              'aria-label': t('lanAccess'),
+              disabled: state.busy || !state.value,
+              onClick: toggle,
+            },
+            h('i'),
+          ),
+        ),
+        state.value ? h('div', { className: 'dlas-meta' }, t('lanEndpoint', { url: state.value.url })) : null,
+        state.value ? h('div', { className: 'dlas-meta' }, t('lanToken'), ': ', state.value.tokenFile) : null,
+        saved ? h('div', { className: 'dlas-meta', role: 'status' }, t('lanSaved')) : null,
+        state.error ? h('div', { className: 'dlas-warn', role: 'alert' }, t('lanFailed'), ' ', state.error.message) : null,
+      );
+    }
+
     function LiveActivities({ t }) {
       const { activities, error, failures } = useActivities();
       const now = useNow(1000);
@@ -752,6 +854,9 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { en, zh }));
         const bound = ctx.locale.bind(NS);
+        ctx.slots.inject('plugins.bundle.config', () =>
+          ctx.slots.register({ name: 'plugins.bundle.config', key: '@local/dsh-live-activity', locale: NS }, PluginSettings),
+        );
         ctx.slots.inject('shell.overlay', () =>
           ctx.slots.register({ name: 'shell.overlay', id: 'dsh-live-activity', order: 30, locale: NS }, props =>
             h(LiveActivities, { ...props, t: props && props.t ? props.t : bound }),

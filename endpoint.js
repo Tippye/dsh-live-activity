@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 /**
@@ -12,7 +12,9 @@ import { join } from 'node:path';
  * `host: '0.0.0.0'` in the plugin config makes it reachable from other
  * machines, and the bearer token in the profile is then the only gate.
  */
-export const DEFAULT_HOST = '127.0.0.1';
+export const LOOPBACK_HOST = '127.0.0.1';
+export const LAN_HOST = '0.0.0.0';
+export const DEFAULT_HOST = LOOPBACK_HOST;
 export const DEFAULT_PORT = 41363;
 export const MAX_BODY = 65536;
 export const ALLOWED_ACTIONS = ['create', 'update', 'end', 'dismiss', 'list', 'get'];
@@ -27,6 +29,26 @@ const STATUS = {
   TOO_LARGE: 413,
   FORBIDDEN: 403,
 };
+
+/**
+ * The interface the listener binds. LAN access is opt-in and off by default:
+ * turning it on exposes an authenticated but unencrypted HTTP port to the
+ * local network, so it stays a deliberate choice.
+ */
+export function bindHost(lanAccess) {
+  return lanAccess === true ? LAN_HOST : LOOPBACK_HOST;
+}
+
+/** IPv4 addresses other machines can dial when the listener is bound wild. */
+export function lanUrls(port) {
+  const urls = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const entry of list ?? []) {
+      if (entry.family === 'IPv4' && !entry.internal) urls.push(`http://${entry.address}:${port}`);
+    }
+  }
+  return urls;
+}
 
 /** `$DSH_HOME/plugin-data/dsh-live-activity`, the same place plugins keep data. */
 export function endpointDir() {
@@ -102,7 +124,9 @@ function reply(response, status, payload) {
 export async function startEndpoint(store, options = {}) {
   const { host = DEFAULT_HOST, port = DEFAULT_PORT, config = {}, logger } = options;
   const endpointConfigured = config && typeof config === 'object' ? config : {};
-  const desiredHost = typeof endpointConfigured.host === 'string' && endpointConfigured.host.trim() ? endpointConfigured.host.trim() : host;
+  const desiredHost = typeof endpointConfigured.host === 'string' && endpointConfigured.host.trim()
+    ? endpointConfigured.host.trim()
+    : bindHost(endpointConfigured.lanAccess ?? options.lanAccess);
   const desiredPort = Number.isInteger(endpointConfigured.port) ? endpointConfigured.port : port;
   const { token, file, created } = await readOrCreateToken();
 
@@ -154,11 +178,15 @@ export async function startEndpoint(store, options = {}) {
   }
 
   const actualPort = server.address().port;
-  const url = `http://${desiredHost}:${actualPort}`;
-  if (logger) logger.info('Live activity endpoint listening on %s (token in %s%s)', url, file, created ? ', newly created' : '');
+  // A wildcard bind has no dialable address of its own, so report the interfaces.
+  const wildcard = desiredHost === LAN_HOST || desiredHost === '::';
+  const urls = wildcard ? lanUrls(actualPort) : [`http://${desiredHost}:${actualPort}`];
+  const url = urls[0] ?? `http://${desiredHost}:${actualPort}`;
+  if (logger) logger.info('Live activity endpoint listening on %s%s (token in %s%s)', `${desiredHost}:${actualPort}`, wildcard ? ` as ${urls.join(', ')}` : '', file, created ? ', newly created' : '');
 
   return {
     url,
+    urls,
     host: desiredHost,
     port: actualPort,
     tokenFile: file,

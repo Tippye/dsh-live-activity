@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { LiveActivityError, LiveActivityStore, validateRecord } from './model.js';
 import { startEndpoint } from './endpoint.js';
 
-export const inject = ['storageDomain', 'tools', 'connection', 'systemPrompt', 'timer'];
+export const inject = ['storageDomain', 'tools', 'connection', 'systemPrompt', 'timer', 'configEditor'];
+
+const PACKAGE = '@local/dsh-live-activity';
+const ROW_ID = 'dsh-live-activity';
 
 const string = description => ({ type: 'string', ...(description ? { description } : {}) });
 const nullable = schema => ({ oneOf: [schema, { type: 'null' }] });
@@ -14,7 +17,8 @@ export const toolSchema = {
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['create', 'update', 'end', 'dismiss', 'list', 'get', 'endpoint'] },
+      action: { type: 'string', enum: ['create', 'update', 'end', 'dismiss', 'list', 'get', 'endpoint', 'settings', 'set-lan-access'] },
+      enabled: { type: 'boolean', description: 'set-lan-access only: true lets other machines on the local network reach the HTTP endpoint; false keeps it on loopback.' },
       id: string('Activity id returned by create; required for update, end, get and dismiss.'),
       title: string('Card title, set once on create and never changed afterwards (max 80).'),
       subtitle: string('Optional small line above the phase, such as the project or the target host (max 120).'),
@@ -73,23 +77,52 @@ export async function apply(ctx, config = {}) {
 
   // A program can drive a card on its own through this endpoint; the token file
   // is the handoff, and the same progress gate applies to every call.
-  const endpoint = await startEndpoint(store, { config, logger: ctx.logger });
+  let endpoint = await startEndpoint(store, { config, logger: ctx.logger });
+
+  /** Persist a new row config; the Loader re-applies this row, rebinding the listener. */
+  const settings = () => ({
+    lanAccess: endpoint.host !== '127.0.0.1',
+    host: endpoint.host,
+    port: endpoint.port,
+    url: endpoint.url,
+    urls: endpoint.urls,
+    tokenFile: endpoint.tokenFile,
+  });
+
+  const setLanAccess = async enabled => {
+    const candidates = ctx.configEditor.entries();
+    const entry = candidates.find(candidate => candidate.options?.id === ROW_ID || candidate.options?.name === PACKAGE);
+    if (!entry) {
+      const seen = candidates.map(candidate => candidate.options?.id).filter(Boolean).slice(0, 12).join(', ');
+      throw new LiveActivityError('FORBIDDEN', `Cannot find the ${ROW_ID} row in this profile (rows: ${seen || 'none'}).`);
+    }
+    await ctx.configEditor.edit(entry, current => ({ ...current, lanAccess: enabled === true, port: Number.isInteger(current.port) ? current.port : endpoint.port }));
+    // configEditor.edit resolves after the Loader reconciles the row, so the
+    // listener has already rebound by the time this returns.
+    return { saved: true, lanAccess: enabled === true };
+  };
 
   ctx.tools.register({
     ...toolSchema,
     output: { schema: {}, render: (_args, value) => resultBlocks(value) },
-    isConcurrencySafe: args => ['get', 'list', 'endpoint'].includes(args?.action),
-    execute: (args, exec) =>
-      args?.action === 'endpoint'
-        ? {
+    isConcurrencySafe: args => ['get', 'list', 'endpoint', 'settings'].includes(args?.action),
+    execute: async (args, exec) => {
+      if (args?.action === 'settings') return settings();
+      if (args?.action === 'set-lan-access') {
+        if (typeof args.enabled !== 'boolean') throw new LiveActivityError('INVALID_INPUT', 'enabled must be a boolean.');
+        return setLanAccess(args.enabled);
+      }
+      if (args?.action !== 'endpoint') return store.run(args, exec.agent?.id);
+      return {
             url: endpoint.url,
+            urls: endpoint.urls,
             host: endpoint.host,
             port: endpoint.port,
             tokenFile: endpoint.tokenFile,
-            usage: 'POST JSON with the same operations this tool accepts, and send "Authorization: Bearer <token>" where <token> is the content of tokenFile. Bind another interface by setting the plugin config host (for example "0.0.0.0") when a program on another machine must reach it.',
-          }
-        : store.run(args, exec.agent?.id),
-    presentCall: args => ({ card: 'generic', title: `Live activity · ${args.action}`, kind: ['get', 'list', 'endpoint'].includes(args.action) ? 'read' : 'edit' }),
+        usage: 'POST JSON with the same operations this tool accepts, and send "Authorization: Bearer <token>" where <token> is the content of tokenFile. The listener binds loopback only; use action "set-lan-access" with enabled: true when a program on another machine must reach it.',
+      };
+    },
+    presentCall: args => ({ card: 'generic', title: `Live activity · ${args.action}`, kind: ['get', 'list', 'endpoint', 'settings'].includes(args.action) ? 'read' : 'edit' }),
   });
   ctx.effect(() => endpoint.dispose);
 
@@ -112,10 +145,15 @@ export async function apply(ctx, config = {}) {
         const raw = await request.text();
         if (raw.length > 65536) throw new LiveActivityError('TOO_LARGE', 'Request exceeds 64 KiB.');
         const input = JSON.parse(raw);
-        if (!input || typeof input !== 'object' || !['list', 'get', 'dismiss'].includes(input.action)) {
-          throw new LiveActivityError('FORBIDDEN', 'The card view can only list, get or dismiss activities.');
+        if (!input || typeof input !== 'object' || !['list', 'get', 'dismiss', 'settings', 'set-lan-access'].includes(input.action)) {
+          throw new LiveActivityError('FORBIDDEN', 'The card view can only list, get, dismiss or read and change its own settings.');
         }
-        const value = await store.run(input);
+        const value =
+          input.action === 'settings'
+            ? settings()
+            : input.action === 'set-lan-access'
+              ? await setLanAccess(input.enabled === true)
+              : await store.run(input);
         return Response.json({ ok: true, value }, { headers: { 'Cache-Control': 'no-store' } });
       } catch (error) {
         const code = error.code ?? 'INVALID_REQUEST';

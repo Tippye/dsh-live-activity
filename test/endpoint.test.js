@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startEndpoint, readOrCreateToken, endpointDir } from '../endpoint.js';
+import { startEndpoint, readOrCreateToken, endpointDir, bindHost, lanUrls } from '../endpoint.js';
 import { LiveActivityStore } from '../model.js';
 
 class FakeTable {
@@ -38,6 +38,18 @@ const post = (endpoint, body, bearer = token) =>
     headers: { 'Content-Type': 'application/json', ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
+
+test('the listener binds loopback unless LAN access is on', async t => {
+  assert.equal(bindHost(false), '127.0.0.1', 'loopback by default');
+  assert.equal(bindHost(undefined), '127.0.0.1', 'a missing setting stays on loopback');
+  assert.equal(bindHost(true), '0.0.0.0', 'LAN access binds every interface');
+  assert.ok(Array.isArray(lanUrls(41363)), 'lanUrls always answers a list');
+
+  const endpoint = await startEndpoint(store, { port: 0 });
+  t.after(() => endpoint.dispose());
+  assert.equal(endpoint.host, '127.0.0.1');
+  assert.deepEqual(endpoint.urls, [`http://127.0.0.1:${endpoint.port}`], 'a loopback listener reports one dialable URL');
+});
 
 test('the endpoint creates, updates and closes a card', async t => {
   const endpoint = await startEndpoint(store, { port: 0 });

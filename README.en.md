@@ -153,29 +153,49 @@ call({'action': 'end', 'id': card['id'], 'phase': 'Training finished'})
 The endpoint accepts `POST` only; a missing token answers 401, a body over 64 KiB
 answers 413, and an unknown action answers 400.
 
-### Other machines (a training server, a robot)
+### The LAN switch (off by default)
 
-It listens on loopback by default, so **another machine cannot reach it**. Two
-options:
+The plugin settings carry a **LAN access** switch: **Plugins** → the
+`@local/dsh-live-activity` page → the toggle. It maps to this row's `config` in
+the profile's `cordis.patch.yml`:
 
-- **Tunnel it (recommended)**: open an SSH tunnel from the remote host, which
-  forwards that host's port to this machine's endpoint
-  ```sh
-  ssh -N -L 41363:127.0.0.1:41363 <you>@<the machine running DSH>
-  ```
-  The remote script keeps posting to `http://127.0.0.1:41363`; nothing is
-  exposed on the LAN and no plugin config changes.
-- **Listen on the LAN**: add a `config` to this row in the profile's
-  `cordis.patch.yml`:
-  ```yaml
-  - id: dsh-live-activity
-    name: '@local/dsh-live-activity'
-    config: { host: '0.0.0.0' }
-  ```
-  After a restart, devices on the same network can use
-  `http://<this-host-ip>:41363` (macOS may ask about the firewall). In that mode
-  the token is the only defence and the traffic is plain HTTP, so keep it to a
-  network you trust.
+```yaml
+- id: dsh-live-activity
+  name: '@local/dsh-live-activity'
+  config:
+    lanAccess: false   # loopback only by default
+    port: 41363
+```
+
+Turning it on binds `0.0.0.0:41363`, so every interface on this machine answers,
+and `settings` returns addresses a script can paste directly:
+
+```json
+{"lanAccess":true,"host":"0.0.0.0","port":41363,"url":"http://192.168.100.176:41363","urls":["http://192.168.100.176:41363"]}
+```
+
+The switch applies immediately — saving the config makes the Loader reload the
+row, which rebinds the listener — and no DSH restart is needed. Turning it off
+returns to loopback at once. The agent can flip it too, via `live_activity` with
+`set-lan-access` and `enabled: true|false`.
+
+Be aware of the cost: with it on, any device on the same network can reach that
+port; the token is the only gate and the traffic is plain HTTP. Keep it to a
+network you trust and turn it back off afterwards.
+
+### Machines on another network: an SSH tunnel
+
+When the other machine is not on your network (a public server, for instance),
+forward the port instead of opening the LAN switch — nothing is exposed outward:
+
+```sh
+# run on the machine hosting DSH: forward the remote 41400 back to local 41363
+ssh -N -R 41400:127.0.0.1:41363 <user>@<remote-host>
+```
+
+The remote script then posts to `http://127.0.0.1:41400`. This is the path that
+was tested: a Linux host on another network created a card, sent four loss
+samples, ended it, and the local `list` showed the whole record.
 
 ## Where things are
 
