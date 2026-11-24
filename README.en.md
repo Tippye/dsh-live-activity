@@ -40,6 +40,35 @@ A card is only for work that keeps reporting a quantity that changes while it ru
 
 Refused: status-only narration, an already finished step, an ETA on its own, a single tool call, a decision or confirmation. Those belong in the reply; use `dsh_board` when a durable checklist is what the user needs. Once a card exists, an `update` may not drop both the progress and the series (call `end` to close it), so a card cannot degrade into a text-only badge.
 
+## Timing and estimate (tqdm style)
+
+A progress card carries a tqdm-style timing line under the bar:
+
+```
+elapsed 00:14 · 00:01 left · 00:15 total · 1.1/s
+```
+
+- **elapsed**: measured from the card's `startedAt` and ticked locally in the
+  browser every second, so it never depends on polling.
+- **rate**: derived from the progress points the plugin records itself
+  (`track`, at most 24 points, the first always kept) as
+  `(latest − first) / Δt` — an average rate that needs nothing from the agent
+  and is not thrown off by one jittery reading.
+- **left / total**: `left = (total − done) ÷ rate`, `total = elapsed + left`.
+  Until a rate exists (only one point), the agent's `etaEpochSeconds` is used
+  for the remaining time; with neither, only "elapsed" is shown.
+- **An ended card** freezes its elapsed time and drops left/total; a
+  **series-only** card still shows elapsed, so you know how long it has run.
+
+Agents and HTTP callers see the same derivation in `get` / `list`:
+
+```json
+"timing": { "elapsedMs": 14000, "rate": 1.1, "remainingMs": 900, "totalMs": 14900, "unit": "items" }
+```
+
+`unit` is `items` for a counting card (rate in items per second) and `fraction`
+for a proportional one.
+
 ## Look
 
 The card follows the visual language of [shadcn charts](https://ui.shadcn.com/charts/area): a flat card (1 px border, near-flat shadow, no glassmorphism); a `13px/500` title over a `12px` muted phase line; progress as a `24px/600` tabular percentage with a 6 px rounded track; one area chart per numeric series — 2 px stroke, a gradient fill fading downward, three dashed horizontal grid lines; times and states as outlined badges instead of coloured pills. Every colour comes from `--dsw-alias-*` theme tokens, so light and dark themes both hold.
@@ -248,7 +277,8 @@ Points worth knowing:
 
 - Cards are visible only while the DSH window is on screen; minimising it hides them. This is not a system desktop widget.
 - Only the agent writes card content; the UI cannot edit phase or progress, only remove a card.
-- Polling is 2 seconds, so an agent update reaches the card within about 2 seconds. The countdown does not depend on polling.
+- Polling is 2 seconds, so an agent update reaches the card within about 2 seconds. Neither the countdown nor the elapsed/left/total line depends on polling.
+- Left/total extrapolate the **average** rate, so a sudden change in speed takes a while to show; supply `etaEpochSeconds` when you need an exact deadline.
 - A card is created by the agent through the tool or by a program through the HTTP endpoint; there is no manual "new card" control in the UI.
 - The HTTP endpoint listens on loopback by default, needs an SSH tunnel or an explicit config change for other machines, and speaks plain HTTP with no TLS.
 - A tunnel needs the remote to allow SSH port forwarding (the default) and an ssh client on this machine; ssh processes left behind by a force-killed DSH must be cleaned up by hand.

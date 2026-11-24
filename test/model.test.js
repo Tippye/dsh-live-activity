@@ -1,4 +1,4 @@
-import { LiveActivityStore, snapshot, validateRecord, HARD_LIFETIME_MS, MAX_SAMPLES } from '../model.js';
+import { LiveActivityStore, snapshot, validateRecord, HARD_LIFETIME_MS, MAX_SAMPLES, MAX_TRACK } from '../model.js';
 
 let clock = 1_700_000_000_000;
 const now = () => clock;
@@ -137,5 +137,34 @@ const dismissed = await store.run({ action: 'create', title: 'Dismiss me', phase
 await store.run({ action: 'dismiss', id: dismissed.id });
 assert(store.list().activities.length === 0, 'dismiss removes the record');
 assert(snapshot({ id: 'x' }).id === 'x', 'snapshot copies a plain record');
+
+// ---- tqdm-style timing ----
+
+const timed = await store.run({ action: 'create', title: 'Timing', phase: 'Start', completed: 0, total: 100 });
+clock += 10_000;
+await store.run({ action: 'update', id: timed.id, completed: 25 });
+clock += 10_000;
+const midway = await store.run({ action: 'update', id: timed.id, completed: 50 });
+assert(midway.timing.elapsedMs === 20_000, 'elapsed counts from the card start');
+assert(Math.abs(midway.timing.rate - 2.5) < 0.001, 'the rate comes from the tracked points');
+assert(midway.timing.remainingMs === 20_000, 'remaining follows the measured rate');
+assert(midway.timing.totalMs === 40_000, 'total is elapsed plus remaining');
+
+const repeat = await store.run({ action: 'update', id: timed.id, phase: 'Nothing moved yet' });
+assert(repeat.track.length === midway.track.length, 'a repeated reading is not tracked twice');
+
+for (let i = 0; i < 40; i++) {
+  clock += 1000;
+  await store.run({ action: 'update', id: timed.id, completed: Math.min(100, 51 + i) });
+}
+const cappedTrack = store.get(timed.id);
+assert(cappedTrack.track.length === MAX_TRACK, `the track is capped at ${MAX_TRACK} points`);
+assert(cappedTrack.track[0].done === 0, 'the baseline point survives the cap');
+
+clock += 5_000;
+const finished = await store.run({ action: 'end', id: timed.id, phase: 'Done' });
+assert(finished.timing.remainingMs === null, 'an ended card has no remaining time');
+assert(finished.timing.elapsedMs === 65_000, 'an ended card freezes its elapsed time');
+await store.run({ action: 'dismiss', id: timed.id });
 
 console.log('\nall model checks passed');

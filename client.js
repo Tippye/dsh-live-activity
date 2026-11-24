@@ -20,7 +20,6 @@ window.__ModuleLoader__.load({
       refreshedMinutes: '{n}m ago',
       refreshedHours: '{n}h ago',
       eta: 'ETA {time}',
-      etaLeft: '{left} left',
       overdue: 'Overdue · ETA {time}',
       stale: 'Needs refresh',
       ended: 'Ended',
@@ -48,6 +47,14 @@ window.__ModuleLoader__.load({
       viaTunnel: 'through the tunnel',
       viaLan: 'on the local network',
       reporter: '{where} · {ip}',
+      elapsed: '已 {time}',
+      remaining: '剩 {time}',
+      totalTime: '共 {time}',
+      rate: '{value}/s',
+      elapsed: 'elapsed {time}',
+      remaining: '{time} left',
+      totalTime: '{time} total',
+      rate: '{value}/s',
       lanFailed: 'Could not read the endpoint settings.',
     };
     const zh = {
@@ -56,7 +63,6 @@ window.__ModuleLoader__.load({
       refreshedMinutes: '{n} 分钟前更新',
       refreshedHours: '{n} 小时前更新',
       eta: '预计 {time}',
-      etaLeft: '剩 {left}',
       overdue: '已超时 · 预计 {time}',
       stale: '待更新',
       ended: '已结束',
@@ -132,6 +138,7 @@ window.__ModuleLoader__.load({
       '.dla-value>span{font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
       '.dla-bar{margin-top:2px;height:6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}',
       '.dla-bar>i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .4s cubic-bezier(.4,0,.2,1)}',
+      '.dla-timing{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;font-size:10.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
       '.dla-detail{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
       '.dla-series{display:flex;flex-direction:column;gap:10px}',
       '.dla-series-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:5px}',
@@ -277,6 +284,40 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /**
+     * tqdm-style timing: elapsed since the card started, the measured rate from
+     * the tracked points, and what that implies for the rest of the work. The
+     * report's own ETA wins when no rate can be measured yet.
+     */
+    function timingOf(activity, now) {
+      const state = activity.state || {};
+      const ended = activity.status === 'ended';
+      const at = ended && Number.isFinite(activity.endedAt) ? activity.endedAt : now;
+      const elapsedMs = Math.max(0, at - (Number.isFinite(activity.startedAt) ? activity.startedAt : at));
+      const track = Array.isArray(activity.track) ? activity.track : [];
+      const done = Number.isFinite(state.completed) ? state.completed : Number.isFinite(state.progress) ? state.progress : null;
+      const total = Number.isInteger(state.total) ? state.total : Number.isFinite(state.progress) ? 1 : null;
+      let rate = null;
+      if (done !== null && track.length >= 2) {
+        const delta = track[track.length - 1].done - track[0].done;
+        const seconds = (track[track.length - 1].at - track[0].at) / 1000;
+        if (seconds > 0 && delta > 0) rate = delta / seconds;
+      }
+      let remainingMs = null;
+      if (!ended) {
+        if (rate !== null && total !== null && done !== null) remainingMs = Math.max(0, ((total - done) / rate) * 1000);
+        else if (Number.isFinite(state.etaEpochSeconds)) remainingMs = Math.max(0, state.etaEpochSeconds * 1000 - now);
+      }
+      return { elapsedMs, rate, remainingMs, totalMs: remainingMs === null ? null : elapsedMs + remainingMs };
+    }
+
+    function formatRate(rate) {
+      if (!Number.isFinite(rate) || rate <= 0) return null;
+      if (rate >= 100) return String(Math.round(rate));
+      if (rate >= 10) return rate.toFixed(1);
+      return String(parseFloat(rate.toPrecision(2)));
+    }
+
     /** Marks a card whose progress comes from another machine. */
     function NetBadge({ reporter, t }) {
       if (!reporter || !reporter.ip) return null;
@@ -384,9 +425,7 @@ window.__ModuleLoader__.load({
           h(
             'span',
             { key: 'eta', className: 'dla-badge', 'data-tone': remaining <= 0 ? 'warn' : 'accent' },
-            remaining <= 0
-              ? t('overdue', { time: clockOf(eta) })
-              : t('eta', { time: clockOf(eta) }) + ' \u00b7 ' + t('etaLeft', { left: countdown(remaining) }),
+            remaining <= 0 ? t('overdue', { time: clockOf(eta) }) : t('eta', { time: clockOf(eta) }),
           ),
         );
       }
@@ -398,6 +437,13 @@ window.__ModuleLoader__.load({
           ? t('removesIn', { left: countdown(dismissIn) })
           : t('ended')
         : refreshed(activity.updatedAt, now, t);
+
+      const timing = timingOf(activity, now);
+      const timingParts = [t('elapsed', { time: countdown(timing.elapsedMs) })];
+      if (timing.remainingMs !== null) timingParts.push(t('remaining', { time: countdown(timing.remainingMs) }));
+      if (timing.totalMs !== null) timingParts.push(t('totalTime', { time: countdown(timing.totalMs) }));
+      const shownRate = formatRate(timing.rate);
+      if (shownRate) timingParts.push(t('rate', { value: shownRate }));
 
       const gradientBase = `dla-grad-${String(activity.id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
@@ -501,6 +547,7 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
+          h('div', { className: 'dla-timing', 'data-timing': 'true' }, timingParts.join(' \u00b7 ')),
           series.length
             ? h('div', { className: 'dla-series' }, series.map((item, index) => h(SeriesChart, { key: item.name, series: item, gradientId: `${gradientBase}-${index}`, t })))
             : null,

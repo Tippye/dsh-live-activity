@@ -14,6 +14,7 @@ export const MAX_ACTIVE = 8;
 export const STALE_MIN_SECONDS = 5;
 export const STALE_MAX_SECONDS = 86400;
 export const MAX_METRICS = 3;
+export const MAX_TRACK = 24;
 export const MAX_SAMPLES = 60;
 
 /**
@@ -174,6 +175,58 @@ export function normalizeState(input, previous, now = Date.now()) {
   return state;
 }
 
+/** The scalar a progress card is advancing: an item count, or the fraction itself. */
+export function doneOf(state) {
+  if (!state) return null;
+  if (Number.isInteger(state.completed)) return state.completed;
+  if (Number.isFinite(state.progress)) return state.progress;
+  return null;
+}
+
+/**
+ * tqdm-style timing, derived rather than reported: the rate comes from the
+ * first and latest tracked point, elapsed from the card's own start. The most
+ * recent point is dropped when it repeats the previous reading.
+ */
+export function appendTrack(track, state, now) {
+  const done = doneOf(state);
+  if (done === null) return Array.isArray(track) ? track : [];
+  const history = Array.isArray(track) ? [...track] : [];
+  const last = history[history.length - 1];
+  if (last && last.done === done) return history;
+  history.push({ at: now, done });
+  if (history.length <= MAX_TRACK) return history;
+  // Long runs must keep the baseline, or the average rate drifts with the window.
+  return [history[0], ...history.slice(-(MAX_TRACK - 1))];
+}
+
+export function timingOf(record, now = Date.now()) {
+  const state = record.state || {};
+  const ended = record.status === 'ended';
+  const at = ended && Number.isFinite(record.endedAt) ? record.endedAt : now;
+  const elapsedMs = Math.max(0, at - record.startedAt);
+  const track = Array.isArray(record.track) ? record.track : [];
+  const done = doneOf(state);
+  const total = Number.isInteger(state.total) ? state.total : Number.isFinite(state.progress) ? 1 : null;
+  let rate = null;
+  if (done !== null && track.length >= 2) {
+    const first = track[0];
+    const last = track[track.length - 1];
+    const delta = last.done - first.done;
+    const seconds = (last.at - first.at) / 1000;
+    if (seconds > 0 && delta > 0) rate = delta / seconds;
+  }
+  // A finished card has nothing left to estimate; it only keeps its elapsed time.
+  const remainingMs = !ended && rate !== null && total !== null && done !== null ? Math.max(0, ((total - done) / rate) * 1000) : null;
+  return {
+    elapsedMs,
+    rate,
+    remainingMs,
+    totalMs: remainingMs === null ? null : elapsedMs + remainingMs,
+    unit: Number.isInteger(state.completed) ? 'items' : 'fraction',
+  };
+}
+
 /** Whether a state carries something worth watching over time. */
 export function tracksProgress(state) {
   if (!state) return false;
@@ -287,6 +340,7 @@ export function snapshot(record, now = Date.now()) {
   value.expiresAt = expiresAtOf(record);
   value.dismissAt = dismissAtOf(record);
   value.sampledAt = now;
+  value.timing = timingOf(record, now);
   return value;
 }
 
@@ -309,6 +363,13 @@ export function validateRecord(value) {
   if (value.endedAt !== undefined) record.endedAt = finite(value.endedAt, 'endedAt');
   if (value.dismissalPolicy !== undefined) record.dismissalPolicy = normalizeDismissal(value.dismissalPolicy);
   if (value.ownerSessionId !== undefined) record.ownerSessionId = string(value.ownerSessionId, 'ownerSessionId', 100, { empty: false });
+  if (value.track !== undefined) {
+    if (!Array.isArray(value.track) || value.track.length > MAX_TRACK) fail('INVALID_RECORD', `Stored track must hold at most ${MAX_TRACK} points.`);
+    record.track = value.track.map(point => {
+      if (!point || typeof point !== 'object' || Array.isArray(point)) fail('INVALID_RECORD', 'Stored track point is not an object.');
+      return { at: finite(point.at, 'track.at'), done: finite(point.done, 'track.done') };
+    });
+  }
   if (value.reporter !== undefined) {
     const reporter = normalizeSource(value.reporter);
     if (Number.isFinite(value.reporter?.at)) reporter.at = value.reporter.at;
@@ -372,6 +433,7 @@ export class LiveActivityStore {
         staleAfterSeconds: normalizeStale(input.staleAfterSeconds, null),
         relevance: normalizeRelevance(input.relevance, 0),
         reporter: { ...normalizeSource(source), at: now },
+        track: appendTrack([], state, now),
         startedAt: now,
         updatedAt: now,
         ...(ownerSessionId ? { ownerSessionId } : {}),
@@ -407,6 +469,7 @@ export class LiveActivityStore {
     if (input.relevance !== undefined) record.relevance = normalizeRelevance(input.relevance, current.relevance);
     record.updatedAt = now;
     record.reporter = { ...normalizeSource(source), at: now };
+    record.track = appendTrack(record.track, state, now);
     if (input.action === 'end') {
       record.status = 'ended';
       record.endedAt = now;
