@@ -16,7 +16,7 @@ git clone https://github.com/Tippye/dsh-live-activity.git
 
 Then open **Plugins** in DSH, choose **Add plugin** and select the cloned directory, then enable `@local/dsh-live-activity`. Its dependency (`zod`) resolves during installation, so no manual `npm install` is needed. No configuration is required afterwards.
 
-Current version `1.8.0` (the manifest is authoritative). The repository directory *is* the installed plugin — the profile holds a `link:` symlink — so `git pull` updates it; reload Host code from the **Plugins** panel and refresh the window after editing `client.js`.
+Current version `1.8.1` (the manifest is authoritative). The repository directory *is* the installed plugin — the profile holds a `link:` symlink — so `git pull` updates it; reload Host code from the **Plugins** panel and refresh the window after editing `client.js`.
 
 Disabling or uninstalling the bundle keeps the stored card records in your profile; re-enabling shows them again.
 

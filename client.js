@@ -7,6 +7,7 @@ window.__ModuleLoader__.load({
 
     const NS = 'dsh-live-activity';
     const PACKAGE_NAME = '@local/dsh-live-activity';
+    const ROW_ID = 'dsh-live-activity';
     const LAYOUT_KEY = 'dsh-live-activity:layout:v2';
     const LEGACY_LAYOUT_KEY = 'dsh-live-activity:layout';
     const POLL_MS = 2000;
@@ -949,12 +950,20 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { en, zh }));
         const bound = ctx.locale.bind(NS);
-        // `immediately` is required: the plugin manager reads its config-slot ledger
-    // from the same module graph this bundle joins, so a deferred factory would not
-    // be visible there and the detail page would omit the settings section.
-    ctx.slots.inject('plugins.bundle.config', () =>
-      ctx.slots.register({ name: 'plugins.bundle.config', key: PACKAGE_NAME, immediately: true, locale: NS }, PluginSettings),
-    );
+        // The plugin manager renders two different pages: the bundle page looks up
+        // `plugins.bundle.config` under the package name, the row page looks up
+        // `plugins.row.config` under "<package>#<rowId>". Registering both keeps
+        // the switches reachable from either page instead of only the first.
+        //
+        // A keyed config cell receives `view`, `form` and the `t` bound by
+        // `locale`; the fallback keeps the labels working if a host ever omits it.
+        const settingsCell = props => h(PluginSettings, { ...props, t: (props && props.t) ? props.t : bound });
+        const settings = () =>
+          ctx.slots.register({ name: 'plugins.bundle.config', key: PACKAGE_NAME, locale: NS }, settingsCell);
+        const rowSettings = () =>
+          ctx.slots.register({ name: 'plugins.row.config', key: `${PACKAGE_NAME}#${ROW_ID}`, locale: NS }, settingsCell);
+        ctx.slots.inject('plugins.bundle.config', settings);
+        ctx.slots.inject('plugins.row.config', rowSettings);
         ctx.slots.inject('shell.overlay', () =>
           ctx.slots.register({ name: 'shell.overlay', id: 'dsh-live-activity', order: 30, locale: NS }, props =>
             h(LiveActivities, { ...props, t: props && props.t ? props.t : bound }),

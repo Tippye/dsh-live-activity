@@ -103,7 +103,7 @@ call({'action': 'end', 'id': card['id'], 'phase': '训练完成'})
 
 ## 配置
 
-在 **插件** 面板 → `@local/dsh-live-activity` 页面配置，或写入 profile 的 `cordis.patch.yml`：
+在 **插件** 面板打开 `@local/dsh-live-activity`：包页面上有这两个开关，`dsh-live-activity` 行上的配置入口打开的是同一组。也可以直接写入 profile 的 `cordis.patch.yml`：
 
 ```yaml
 - id: dsh-live-activity
