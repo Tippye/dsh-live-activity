@@ -2,11 +2,9 @@
 
 English · [简体中文](README.md)
 
-A DeepSeek Harness (DSH) plugin modelled on iOS Live Activities: an agent creates a floating status card for long-running work. The card floats above the DSH window, stays visible after the reply ends, and shows phase, progress and an expected-finish countdown.
+A DeepSeek Harness (DSH) plugin: an agent creates a live activity card for running work, and the card floats above the DSH window showing progress updates. It stays visible after the reply ends, and phase, progress, rate and estimated time left refresh as the work advances.
 
-![A live activity card in the running app: progress, counts and two area charts](docs/card.png)
-
-Captured from a running DSH window: `94%` with `15 / 16` beside it, one area chart per series, and the fold/close controls each card carries in its header. Card content is written by the agent; interface labels follow your app language (this capture is the light theme with a Chinese UI).
+![A live activity card](docs/card.png)
 
 ## Install
 
@@ -16,13 +14,15 @@ A DSH plugin is installed as a "bundle", and this repository is one:
 git clone https://github.com/Tippye/dsh-live-activity.git
 ```
 
-Then open **Plugins** in DSH, choose **Add plugin** and select the cloned directory, then enable `@local/dsh-live-activity`. Its dependency (`zod`) resolves during installation, so no manual `npm install` is needed. No configuration afterwards.
+Then open **Plugins** in DSH, choose **Add plugin** and select the cloned directory, then enable `@local/dsh-live-activity`. Its dependency (`zod`) resolves during installation, so no manual `npm install` is needed. No configuration is required afterwards.
+
+Current version `1.8.0` (the manifest is authoritative). The repository directory *is* the installed plugin — the profile holds a `link:` symlink — so `git pull` updates it; reload Host code from the **Plugins** panel and refresh the window after editing `client.js`.
 
 Disabling or uninstalling the bundle keeps the stored card records in your profile; re-enabling shows them again.
 
 ## Why the card lives inside the app
 
-iOS hosts Live Activities: the card keeps rendering after the app is backgrounded or suspended. DSH Desktop is an Electron app, but Host plugins run inside a `dsh-desktop-host` child process launched with `ELECTRON_RUN_AS_NODE=1`. There `require('electron')` fails, `process.type` is undefined, and the IPC the child can send to the main process covers only `quit-inspection`, `update-tasks`, `platform-session` and `plugin-operation` — there is no window-creation request. A plugin therefore cannot create a native always-on-top window.
+A system desktop widget has to be hosted by the operating system and rendered independently of the application process. DSH Desktop is an Electron app, but Host plugins run inside a `dsh-desktop-host` child process launched with `ELECTRON_RUN_AS_NODE=1`. There `require('electron')` fails, `process.type` is undefined, and the IPC the child can send to the main process covers only `quit-inspection`, `update-tasks`, `platform-session` and `plugin-operation` — there is no window-creation request. A plugin therefore cannot create a native always-on-top window.
 
 So the card renders inside the DSH window, in the `shell.overlay` slot: the frame-wide floating layer above every column and outside their scroll containers. It reads as a floating window pinned to the app, and it survives switching sessions.
 
@@ -35,14 +35,14 @@ A card is only for work that keeps reporting a quantity that changes while it ru
 | Allowed | Example |
 |---|---|
 | Determinate fraction | `progress: 0.42` |
-| tqdm-style count | `completed: 120, total: 500` (derives 0.24) |
+| item count | `completed: 120, total: 500` (derives 0.24) |
 | Numeric series (chart) | `metrics: [{ "name": "loss", "value": 0.42 }]`, one more point per update, drawn as a line |
 
-Refused: status-only narration, an already finished step, an ETA on its own, a single tool call, a decision or confirmation. Those belong in the reply; use `dsh_board` when a durable checklist is what the user needs. Once a card exists, an `update` may not drop both the progress and the series (call `end` to close it), so a card cannot degrade into a text-only badge.
+Refused: status-only narration, an already finished step, an ETA on its own, a single tool call, a decision or confirmation. Report these in the reply; use `dsh_board` when a durable checklist is needed. Once a card exists, an `update` may not drop both the progress and the series (call `end` to close it), so a card cannot degrade into a text-only badge.
 
-## Timing and estimate (tqdm style)
+## Timing and estimate
 
-A progress card carries a tqdm-style timing line under the bar:
+A progress card carries a timing line under the bar:
 
 ```
 elapsed 00:14 · 00:01 left · 00:15 total · 1.1/s
@@ -58,7 +58,7 @@ elapsed 00:14 · 00:01 left · 00:15 total · 1.1/s
   Until a rate exists (only one point), the agent's `etaEpochSeconds` is used
   for the remaining time; with neither, only "elapsed" is shown.
 - **An ended card** freezes its elapsed time and drops left/total; a
-  **series-only** card still shows elapsed, so you know how long it has run.
+  **series-only** card still shows elapsed, keeping its runtime visible.
 
 Agents and HTTP callers see the same derivation in `get` / `list`:
 
@@ -71,23 +71,7 @@ for a proportional one.
 
 ## Look
 
-The card follows the visual language of [shadcn charts](https://ui.shadcn.com/charts/area): a flat card (1 px border, near-flat shadow, no glassmorphism); a `13px/500` title over a `12px` muted phase line; progress as a `24px/600` tabular percentage with a 6 px rounded track; one area chart per numeric series — 2 px stroke, a gradient fill fading downward, three dashed horizontal grid lines; times and states as outlined badges instead of coloured pills. Every colour comes from `--dsw-alias-*` theme tokens, so light and dark themes both hold.
-
-## Mapped to ActivityKit
-
-| ActivityKit | This plugin |
-|---|---|
-| `ActivityAttributes` (immutable) | `attributes`: `title`, `subtitle`, `symbol`, `accent` |
-| `ContentState` (updatable) | `state`: `phase`, `detail`, `progress`, `etaEpochSeconds`; `update` merges partially |
-| `Activity.request` | `live_activity` with `action: "create"` |
-| `activity.update` | `action: "update"` |
-| `activity.end` + `dismissalPolicy` | `action: "end"` + `dismissalPolicy` |
-| `staleDate` / `isStale` | `staleAfterSeconds`; past it the card turns "needs refresh" and goes amber |
-| `Text(timerInterval:)` countdown | `etaEpochSeconds` ticks down locally in the browser, no repeated updates needed |
-| `ProgressView(value:)` bar | `progress`, or a tqdm-style `completed`/`total` count |
-| A live chart on the card | named `metrics` series; the card draws one line per series (at most 3, latest 60 points each) |
-| 8 hour limit, up to 4 hours retained after end | The same limits and retention window |
-| `Activity.activities` (recover after restart) | Records live in the profile's storageDomain, so cards survive a DSH restart |
+The card follows the visual language of [shadcn charts](https://ui.shadcn.com/charts/area): a flat card (1 px border, near-flat shadow, no glassmorphism); a `13px/500` title over a `12px` muted phase line; progress as a `24px/600` tabular percentage with a 6 px rounded track; one area chart per numeric series — 2 px stroke, a gradient fill fading downward, three dashed horizontal grid lines; a `10.5 px` muted line under the bar carries the timing (elapsed/left/total/rate); times and states as outlined badges instead of coloured pills. Every colour comes from `--dsw-alias-*` theme tokens, so light and dark themes both hold.
 
 ## Use
 
@@ -98,7 +82,7 @@ Once enabled, nothing to configure. Ask the agent to do something with progress 
 - "Train this model for 200 epochs and plot the loss on the card."
 - "Deploy to staging, and end the card when it's done."
 
-A status-only task ("check the version", "verify where the report came from") no longer gets a card — it is refused and the agent writes it in the reply. The same rule covers cards created before the gate existed: an old status card cannot be `update`d any more, but it can still be `end`ed normally.
+A status-only task ("check the version", "verify where the report came from") is refused; the agent reports the result in the reply. The same restriction applies to pre-existing status cards: they can no longer be `update`d, but they can still be `end`ed.
 
 Cards appear in the window's top-right corner (`top: 72px; right: 20px`) by default, flowing downward when there are several. **Each card is independent:**
 
@@ -112,7 +96,7 @@ Each card keeps its own position and collapsed state in local storage under its 
 
 ## Agent API
 
-`live_activity` is the only entry point and shares one store with the floating cards. The first three shapes below are legal; the fourth is refused:
+`live_activity` is the only entry point and shares one store with the floating cards. Examples:
 
 ```json
 {"action":"create","title":"Build and deploy","subtitle":"prod","phase":"Compiling","completed":120,"total":500,"etaEpochSeconds":1763650000,"staleAfterSeconds":300,"symbol":"build"}
@@ -139,14 +123,28 @@ Each card keeps its own position and collapsed state in local storage under its 
 - `completed`/`total`: `total` must be a positive integer and `completed` is clamped into `[0, total]`; sending `completed` alone reuses the previous total, which suits a loop with a fixed length.
 - `metrics`: each call appends one point per named series — an existing name continues that series, a new name starts one (at most 3 series, latest 60 points each); `metrics: null` clears every series.
 - `dismissalPolicy`: `"default"` keeps the final state for 10 minutes, `"immediate"` removes it at once, `{"afterSeconds":n}` keeps it for a custom 1–14400 seconds.
-- At most 8 cards are active at once; end an old one first.
+- At most 8 cards are active at once; end an old card first.
+
+The following actions do not modify card data and exist only on the tool side:
+
+| Action | Purpose |
+|---|---|
+| `endpoint` | the program endpoint URL, the token file, and its usage |
+| `settings` | the bound address, both switches, and the active tunnels |
+| `set-lan-access` / `set-allow-tunnel` | flip LAN access or SSH tunnels (writes the profile config) |
+| `tunnel` | `operation: "start" \| "stop" \| "list"` manages tunnels |
+
+**The program-facing HTTP endpoint is deliberately narrower than the tool**: it
+accepts only the card actions `create`/`update`/`end`/`dismiss`/`list`/`get`. It
+cannot read settings, change a switch, or open a tunnel, so a leaked token
+cannot widen the attack surface through it.
 
 ## Driven by a program (HTTP endpoint)
 
-Progress does not have to go through the agent: the plugin serves a local HTTP
+Progress can also bypass the agent: the plugin serves a local HTTP
 endpoint on `127.0.0.1:41363`, and `action: "endpoint"` returns its URL and the
-token file that authorises it. The same operations and the same gate apply, so a
-status-only card is still refused there (422).
+token file that authorizes it. The same operations and gate apply; a
+status-only request still returns 422.
 
 ```sh
 # the token file: 0600, created on first start, stable across restarts
@@ -163,7 +161,7 @@ curl -s http://127.0.0.1:41363 \
   -d '{"action":"update","id":"<id>","completed":9,"total":16}'
 ```
 
-Python's standard library is enough:
+Python's standard library is enough, with no extra dependencies:
 
 ```python
 import json, pathlib, urllib.request
@@ -235,42 +233,39 @@ The remote script then posts to `http://127.0.0.1:41410` with the same bearer
 token. The result carries `remoteUrl` and a usage note; `operation: "list"`
 shows the tunnels, and `operation: "stop"` with a `tunnelId` closes one.
 
-Points worth knowing:
+Behavior and limits:
 
 - **Only the remote host can reach it.** The bind address is written explicitly
   as `127.0.0.1`, so even on that host only local processes can use the port.
-- **It closes with the window and with DSH.** The tunnel belongs to this plugin
+- **It closes with the window and with DSH.** The tunnel is owned by this plugin
   instance: reloading the row (closing the window, disabling the plugin,
-  changing its config) or a normal process exit terminates it. Verified by
-  turning the switch off: the remote listener on `41410` vanished immediately
-  and the next request was refused.
+  changing its config) or a normal process exit terminates it.
 - **A force-kill is the exception.** If DSH is `kill -9`ed or force quit,
   nothing can clean up and the ssh process may linger; finish with
   `pkill -f "ssh -N -R"`.
-- **A small badge after the title says who is reporting.** A card written through
-  a tunnel grows a signal icon next to its title; hovering it shows the machine
-  that actually sent the progress plus the forwarding port
+- **Reporting-source badge.** A card written through
+    a tunnel shows a signal icon next to its title; hovering it shows the machine
+  that reported the progress and the forwarding port
   (`183.147.142.103 · through the tunnel · 127.0.0.1:41410`). A card driven over
-  the LAN shows the same icon with "on the local network", while a local program
-  or the agent itself adds none. The badge also stays on the collapsed pill.
+  the LAN shows the same icon labeled "on the local network"; local programs and
+  agent writes add no badge. The badge also stays on the collapsed pill.
   - Internally, each tunnel opens its own **private loopback listener** (random
     port) as the `-R` target, because a forwarded request reaches the server
     from `127.0.0.1`; only per-listener attribution can name the far machine.
     That listener is closed with the tunnel.
-- The remote bind address must be pinned to IPv4 loopback: on the remote, sshd
-  binds a `-R` port to `[::1]` by default, and dialing `127.0.0.1` then looks
-  like "the tunnel is up but dead" — which is exactly what happened in the
-  first test until the `127.0.0.1:` prefix was added.
+- The remote bind address is pinned to IPv4 loopback: sshd binds a `-R` port
+  to `[::1]` by default, so the explicit `127.0.0.1:` prefix keeps it reachable
+  from IPv4 applications.
 
 ## Where things are
 
-- `index.js` — tool registration, the read-only `/api/dsh-live-activity` route (the page may only list/get/dismiss), the system prompt section, and a 15 second expiry sweep.
-- `model.js` — validation, state merging, lifecycle derivation (`stale`, `expiresAt`, `dismissAt`) and the store.
-- `client.js` — the independent floating cards in `shell.overlay`: 2 second polling, 1 second local countdown.
-- `endpoint.js` — the program-facing HTTP endpoint: token check, body limit, busy-port fallback, bind-address selection.
-- `tunnel.js` — reverse SSH tunnel argv construction and process supervision (spawned through `ctx.subprocess`, torn down with the instance).
+- `index.js` — tool registration, the `/api/dsh-live-activity` page route (cards may only be listed, read or dismissed; the page may also call `settings`, `set-lan-access` and `set-allow-tunnel` for its own two switches), the system prompt section, and a 15 second expiry sweep.
+- `model.js` — validation, state merging, lifecycle derivation (`stale`, `expiresAt`, `dismissAt`), progress tracking and timing derivation (`track` / `timing`), and the store.
+- `client.js` — the independent floating cards in `shell.overlay`: 2 second polling and a 1 second local recompute (neither the countdown nor elapsed/left/total depends on polling).
+- `endpoint.js` — the program-facing HTTP endpoint: token check, body limit, busy-port fallback, bind-address selection, and per-listener source attribution.
+- `tunnel.js` — reverse SSH tunnel argv construction and process supervision (spawned through `ctx.subprocess`, torn down with the instance); each tunnel owns a private loopback listener used to attribute its reports.
 - The reporting source is stored on each card as `reporter` (`type`: `agent`/`local`/`lan`/`tunnel`, plus `ip`, `via`, `at`), refreshed on every write.
-- `bin/live-activity.mjs` — one-shot CLI that reads the token file and posts one request.
+- `bin/live-activity.mjs` — single-request CLI that reads the token file and posts one payload.
 - Records live in the profile's `dsh_live_activity` domain; a corrupt record is backed up and skipped instead of failing the whole plugin load.
 
 ## Known limits
@@ -283,16 +278,16 @@ Points worth knowing:
 - The HTTP endpoint listens on loopback by default, needs an SSH tunnel or an explicit config change for other machines, and speaks plain HTTP with no TLS.
 - A tunnel needs the remote to allow SSH port forwarding (the default) and an ssh client on this machine; ssh processes left behind by a force-killed DSH must be cleaned up by hand.
 - Tunnel arguments are never a free-form command: host and user are character-restricted and the key path must be absolute — so the agent cannot assemble shell syntax.
-- The curve on a card is a small built-in sparkline, not a full chart; for axes, legends and multi-series interaction use an ECharts chart on a `dsh_board`.
+- The card renders a built-in sparkline without axes, legends, or multi-series interaction; use an ECharts chart on a `dsh_board` for full charts.
 
 ## Privacy
 
-Card content stays in your local profile storage and the plugin makes no outbound requests. Between the page and the Host there is only a same-origin `POST /api/dsh-live-activity`, restricted to `list`, `get` and `dismiss`; writes have two legitimate paths — the agent tool, and the token-protected local HTTP endpoint (`endpoint.js`). The token lives in `~/.dsh/plugin-data/dsh-live-activity/token` (mode 0600).
+Card content stays in your local profile storage and the plugin makes no outbound requests. Between the page and the Host there is only a same-origin `POST /api/dsh-live-activity`: card actions are limited to `list`/`get`/`dismiss`, and the page may additionally flip its own two switches (`settings`/`set-lan-access`/`set-allow-tunnel`). Writes have two legitimate paths — the agent tool, and the token-protected HTTP endpoint (`endpoint.js`, card actions only). The token lives in `~/.dsh/plugin-data/dsh-live-activity/token` (directory 0700, file 0600).
 
 ## Development
 
 ```sh
-npm test          # state machine and lifecycle assertions for model.js
+npm test          # model state machine and lifecycle + endpoint auth and gate + tunnel argv and process handling
 ```
 
 After a change: reload Host code from the **Plugins** panel, and refresh the window once after editing `client.js`.

@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useRef, useCallback } = React;
 
     const NS = 'dsh-live-activity';
+    const PACKAGE_NAME = '@local/dsh-live-activity';
     const LAYOUT_KEY = 'dsh-live-activity:layout:v2';
     const LEGACY_LAYOUT_KEY = 'dsh-live-activity:layout';
     const POLL_MS = 2000;
@@ -33,6 +34,7 @@ window.__ModuleLoader__.load({
       collapse: 'Collapse this activity',
       expand: 'Expand this activity',
       unavailable: 'Live activities are unavailable',
+      progress: '{percent}% complete',
       dragHint: 'Drag to move',
       lanAccess: 'LAN access',
       lanAccessDesc: 'Let other machines on your local network drive cards over the HTTP endpoint. Off by default; when it is on, the bearer token is the only gate and traffic is plain HTTP.',
@@ -47,10 +49,6 @@ window.__ModuleLoader__.load({
       viaTunnel: 'through the tunnel',
       viaLan: 'on the local network',
       reporter: '{where} · {ip}',
-      elapsed: '已 {time}',
-      remaining: '剩 {time}',
-      totalTime: '共 {time}',
-      rate: '{value}/s',
       elapsed: 'elapsed {time}',
       remaining: '{time} left',
       totalTime: '{time} total',
@@ -90,6 +88,10 @@ window.__ModuleLoader__.load({
       viaTunnel: '经隧道',
       viaLan: '局域网',
       reporter: '{where} · {ip}',
+      elapsed: '已 {time}',
+      remaining: '剩 {time}',
+      totalTime: '共 {time}',
+      rate: '{value}/s',
       lanFailed: '无法读取接口设置。',
     };
 
@@ -947,9 +949,12 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { en, zh }));
         const bound = ctx.locale.bind(NS);
-        ctx.slots.inject('plugins.bundle.config', () =>
-          ctx.slots.register({ name: 'plugins.bundle.config', key: '@local/dsh-live-activity', locale: NS }, PluginSettings),
-        );
+        // `immediately` is required: the plugin manager reads its config-slot ledger
+    // from the same module graph this bundle joins, so a deferred factory would not
+    // be visible there and the detail page would omit the settings section.
+    ctx.slots.inject('plugins.bundle.config', () =>
+      ctx.slots.register({ name: 'plugins.bundle.config', key: PACKAGE_NAME, immediately: true, locale: NS }, PluginSettings),
+    );
         ctx.slots.inject('shell.overlay', () =>
           ctx.slots.register({ name: 'shell.overlay', id: 'dsh-live-activity', order: 30, locale: NS }, props =>
             h(LiveActivities, { ...props, t: props && props.t ? props.t : bound }),
