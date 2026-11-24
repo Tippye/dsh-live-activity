@@ -183,26 +183,53 @@ Be aware of the cost: with it on, any device on the same network can reach that
 port; the token is the only gate and the traffic is plain HTTP. Keep it to a
 network you trust and turn it back off afterwards.
 
-### Machines on another network: an SSH tunnel
+### Machines on another network: the plugin opens the tunnel
 
-When the other machine is not on your network (a public server, for instance),
-forward the port instead of opening the LAN switch — nothing is exposed outward:
+When the other machine is not on your network, you do not have to open LAN
+access or type the tunnel yourself. A second switch, **SSH tunnels** (off by
+default), lets the agent open one with the tool:
 
-```sh
-# run on the machine hosting DSH: forward the remote 41400 back to local 41363
-ssh -N -R 41400:127.0.0.1:41363 <user>@<remote-host>
+```json
+{"action":"tunnel","operation":"start","host":"183.147.142.103","user":"qujiwang","sshPort":63286,"identityFile":"~/.ssh/PathX","remotePort":41410}
 ```
 
-The remote script then posts to `http://127.0.0.1:41400`. This is the path that
-was tested: a Linux host on another network created a card, sent four loss
-samples, ended it, and the local `list` showed the whole record.
+That is equivalent to opening a port visible only to the remote host itself:
+
+```sh
+ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes \
+    -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 \
+    -p 63286 -i ~/.ssh/PathX \
+    -R 127.0.0.1:41410:127.0.0.1:41363 qujiwang@183.147.142.103
+```
+
+The remote script then posts to `http://127.0.0.1:41410` with the same bearer
+token. The result carries `remoteUrl` and a usage note; `operation: "list"`
+shows the tunnels, and `operation: "stop"` with a `tunnelId` closes one.
+
+Points worth knowing:
+
+- **Only the remote host can reach it.** The bind address is written explicitly
+  as `127.0.0.1`, so even on that host only local processes can use the port.
+- **It closes with the window and with DSH.** The tunnel belongs to this plugin
+  instance: reloading the row (closing the window, disabling the plugin,
+  changing its config) or a normal process exit terminates it. Verified by
+  turning the switch off: the remote listener on `41410` vanished immediately
+  and the next request was refused.
+- **A force-kill is the exception.** If DSH is `kill -9`ed or force quit,
+  nothing can clean up and the ssh process may linger; finish with
+  `pkill -f "ssh -N -R"`.
+- The remote bind address must be pinned to IPv4 loopback: on the remote, sshd
+  binds a `-R` port to `[::1]` by default, and dialing `127.0.0.1` then looks
+  like "the tunnel is up but dead" — which is exactly what happened in the
+  first test until the `127.0.0.1:` prefix was added.
 
 ## Where things are
 
 - `index.js` — tool registration, the read-only `/api/dsh-live-activity` route (the page may only list/get/dismiss), the system prompt section, and a 15 second expiry sweep.
 - `model.js` — validation, state merging, lifecycle derivation (`stale`, `expiresAt`, `dismissAt`) and the store.
 - `client.js` — the independent floating cards in `shell.overlay`: 2 second polling, 1 second local countdown.
-- `endpoint.js` — the program-facing HTTP endpoint: token check, body limit, busy-port fallback.
+- `endpoint.js` — the program-facing HTTP endpoint: token check, body limit, busy-port fallback, bind-address selection.
+- `tunnel.js` — reverse SSH tunnel argv construction and process supervision (spawned through `ctx.subprocess`, torn down with the instance).
 - `bin/live-activity.mjs` — one-shot CLI that reads the token file and posts one request.
 - Records live in the profile's `dsh_live_activity` domain; a corrupt record is backed up and skipped instead of failing the whole plugin load.
 
@@ -213,6 +240,8 @@ samples, ended it, and the local `list` showed the whole record.
 - Polling is 2 seconds, so an agent update reaches the card within about 2 seconds. The countdown does not depend on polling.
 - A card is created by the agent through the tool or by a program through the HTTP endpoint; there is no manual "new card" control in the UI.
 - The HTTP endpoint listens on loopback by default, needs an SSH tunnel or an explicit config change for other machines, and speaks plain HTTP with no TLS.
+- A tunnel needs the remote to allow SSH port forwarding (the default) and an ssh client on this machine; ssh processes left behind by a force-killed DSH must be cleaned up by hand.
+- Tunnel arguments are never a free-form command: host and user are character-restricted and the key path must be absolute — so the agent cannot assemble shell syntax.
 - The curve on a card is a small built-in sparkline, not a full chart; for axes, legends and multi-series interaction use an ECharts chart on a `dsh_board`.
 
 ## Privacy

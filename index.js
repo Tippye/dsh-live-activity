@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { LiveActivityError, LiveActivityStore, validateRecord } from './model.js';
 import { startEndpoint } from './endpoint.js';
+import { TunnelRegistry } from './tunnel.js';
 
-export const inject = ['storageDomain', 'tools', 'connection', 'systemPrompt', 'timer', 'configEditor'];
+export const inject = ['storageDomain', 'tools', 'connection', 'systemPrompt', 'timer', 'configEditor', 'subprocess'];
 
 const PACKAGE = '@local/dsh-live-activity';
 const ROW_ID = 'dsh-live-activity';
@@ -17,8 +18,15 @@ export const toolSchema = {
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['create', 'update', 'end', 'dismiss', 'list', 'get', 'endpoint', 'settings', 'set-lan-access'] },
-      enabled: { type: 'boolean', description: 'set-lan-access only: true lets other machines on the local network reach the HTTP endpoint; false keeps it on loopback.' },
+      action: { type: 'string', enum: ['create', 'update', 'end', 'dismiss', 'list', 'get', 'endpoint', 'settings', 'set-lan-access', 'set-allow-tunnel', 'tunnel'] },
+      operation: { type: 'string', enum: ['start', 'stop', 'list'], description: 'tunnel only: start a reverse SSH tunnel, stop one, or list the active ones.' },
+      tunnelId: string('tunnel stop only: the id a start returned.'),
+      host: string('tunnel start only: the remote host to open the forward on.'),
+      user: string('tunnel start only: the account on that host.'),
+      sshPort: { type: 'integer', description: 'tunnel start only: the remote SSH port; defaults to 22.' },
+      identityFile: string('tunnel start only: absolute path to the private key, such as ~/.ssh/id_ed25519.'),
+      remotePort: { type: 'integer', description: 'tunnel start only: the port opened on the remote host; defaults to the local endpoint port.' },
+      enabled: { type: 'boolean', description: 'set-lan-access and set-allow-tunnel only: the new value of the switch.' },
       id: string('Activity id returned by create; required for update, end, get and dismiss.'),
       title: string('Card title, set once on create and never changed afterwards (max 80).'),
       subtitle: string('Optional small line above the phase, such as the project or the target host (max 120).'),
@@ -87,20 +95,61 @@ export async function apply(ctx, config = {}) {
     url: endpoint.url,
     urls: endpoint.urls,
     tokenFile: endpoint.tokenFile,
+    allowTunnel,
+    tunnels: tunnels.list(),
   });
 
-  const setLanAccess = async enabled => {
+  const configValue = key => (config && typeof config === 'object' ? config[key] : undefined);
+  const allowTunnel = configValue('allowTunnel') === true;
+
+  const tunnels = new TunnelRegistry({
+    spawn: spec => ctx.subprocess.spawn(spec),
+    resolveExecutable: command => ctx.subprocess.resolveExecutable(command),
+    cwd: process.env.HOME || process.env.DSH_HOME || '.',
+    logger: ctx.logger,
+  });
+  // The row unloading (window closed, plugin disabled, config changed) and a
+  // normal process exit both close the tunnels; a force-kill of DSH cannot run
+  // anything, so document `pkill -f "ssh -N -R"` as the manual fallback.
+  const onExit = () => tunnels.killAllSync();
+  process.once('exit', onExit);
+  ctx.effect(() => () => {
+    process.removeListener('exit', onExit);
+    return tunnels.disposeAll();
+  });
+
+  const setSwitch = async (key, enabled) => {
     const candidates = ctx.configEditor.entries();
     const entry = candidates.find(candidate => candidate.options?.id === ROW_ID || candidate.options?.name === PACKAGE);
-    if (!entry) {
-      const seen = candidates.map(candidate => candidate.options?.id).filter(Boolean).slice(0, 12).join(', ');
-      throw new LiveActivityError('FORBIDDEN', `Cannot find the ${ROW_ID} row in this profile (rows: ${seen || 'none'}).`);
-    }
-    await ctx.configEditor.edit(entry, current => ({ ...current, lanAccess: enabled === true, port: Number.isInteger(current.port) ? current.port : endpoint.port }));
-    // configEditor.edit resolves after the Loader reconciles the row, so the
-    // listener has already rebound by the time this returns.
-    return { saved: true, lanAccess: enabled === true };
+    if (!entry) throw new LiveActivityError('FORBIDDEN', `Cannot find the ${ROW_ID} row in this profile, so the setting cannot be saved.`);
+    await ctx.configEditor.edit(entry, current => ({ ...current, [key]: enabled === true }));
+    return { saved: true, [key]: enabled === true };
   };
+
+  const tunnel = async args => {
+    const operation = args.operation ?? 'list';
+    if (operation === 'list') return { allowed: allowTunnel, tunnels: tunnels.list(), endpointPort: endpoint.port };
+    if (!allowTunnel) {
+      throw new LiveActivityError('FORBIDDEN', 'Tunnels are disabled. Ask the user first, then enable the switch with action "set-allow-tunnel" and enabled: true.');
+    }
+    if (operation === 'stop') return tunnels.stop(args.tunnelId);
+    if (operation !== 'start') throw new LiveActivityError('INVALID_INPUT', 'operation must be start, stop or list.');
+    const started = await tunnels.start({
+      host: args.host,
+      user: args.user,
+      sshPort: args.sshPort,
+      identityFile: args.identityFile,
+      remotePort: args.remotePort ?? endpoint.port,
+      localPort: endpoint.port,
+    });
+    return {
+      ...started,
+      remoteUrl: `http://127.0.0.1:${started.remotePort}`,
+      note: `On ${started.target}, POST to ${`http://127.0.0.1:${started.remotePort}`} with the bearer token from the token file. The tunnel closes when DSH closes.`,
+    };
+  };
+
+  const setLanAccess = enabled => setSwitch('lanAccess', enabled);
 
   ctx.tools.register({
     ...toolSchema,
@@ -108,10 +157,11 @@ export async function apply(ctx, config = {}) {
     isConcurrencySafe: args => ['get', 'list', 'endpoint', 'settings'].includes(args?.action),
     execute: async (args, exec) => {
       if (args?.action === 'settings') return settings();
-      if (args?.action === 'set-lan-access') {
+      if (args?.action === 'set-lan-access' || args?.action === 'set-allow-tunnel') {
         if (typeof args.enabled !== 'boolean') throw new LiveActivityError('INVALID_INPUT', 'enabled must be a boolean.');
-        return setLanAccess(args.enabled);
+        return setSwitch(args.action === 'set-lan-access' ? 'lanAccess' : 'allowTunnel', args.enabled);
       }
+      if (args?.action === 'tunnel') return tunnel(args);
       if (args?.action !== 'endpoint') return store.run(args, exec.agent?.id);
       return {
             url: endpoint.url,
@@ -130,7 +180,7 @@ export async function apply(ctx, config = {}) {
     name: 'dsh-live-activity',
     order: 826,
     text:
-      'Live activity cards are for work that keeps reporting measurable progress, nothing else. Create one only when the task exposes a determinate fraction or a tqdm-style count of steps, or a numeric series over time such as training loss, throughput, latency or memory. Supply that in the very first call: progress, or completed plus total, or a metrics sample — create is refused without one. Never create a card for a status-only narration, an already finished step, a decision, a single tool call, or work you can simply describe in the reply; use dsh_board when a durable checklist is what the user needs. While the card exists, drive it from real numbers: update completed as items finish, or send one metrics sample per new point, so the bar or curve moves on its own. Do not update just to tick a timer or to restate the phase text; the countdown from etaEpochSeconds runs locally. An update that drops the progress and the series is refused, so call end when the work is done rather than leaving a stale card. At most 8 cards may be active at once. When the user\'s own script, a build job or a device should report progress without you relaying it, call this tool with action "endpoint": it returns a local HTTP API URL and the token file that authorises it, and the same operations and gate apply there.',
+      'Live activity cards are for work that keeps reporting measurable progress, nothing else. Create one only when the task exposes a determinate fraction or a tqdm-style count of steps, or a numeric series over time such as training loss, throughput, latency or memory. Supply that in the very first call: progress, or completed plus total, or a metrics sample — create is refused without one. Never create a card for a status-only narration, an already finished step, a decision, a single tool call, or work you can simply describe in the reply; use dsh_board when a durable checklist is what the user needs. While the card exists, drive it from real numbers: update completed as items finish, or send one metrics sample per new point, so the bar or curve moves on its own. Do not update just to tick a timer or to restate the phase text; the countdown from etaEpochSeconds runs locally. An update that drops the progress and the series is refused, so call end when the work is done rather than leaving a stale card. At most 8 cards may be active at once. A machine on another network can reach the endpoint through a reverse SSH tunnel: action "tunnel" with operation start (host, user, sshPort, identityFile, remotePort) opens one port on that host and keeps it until DSH closes; it is refused unless the user has enabled the tunnel switch, so ask before turning that switch on with action "set-allow-tunnel". When the user\'s own script, a build job or a device should report progress without you relaying it, call this tool with action "endpoint": it returns a local HTTP API URL and the token file that authorises it, and the same operations and gate apply there.',
   });
 
   // The floating card navigates the same store the agent writes: the page only
@@ -145,14 +195,16 @@ export async function apply(ctx, config = {}) {
         const raw = await request.text();
         if (raw.length > 65536) throw new LiveActivityError('TOO_LARGE', 'Request exceeds 64 KiB.');
         const input = JSON.parse(raw);
-        if (!input || typeof input !== 'object' || !['list', 'get', 'dismiss', 'settings', 'set-lan-access'].includes(input.action)) {
+        if (!input || typeof input !== 'object' || !['list', 'get', 'dismiss', 'settings', 'set-lan-access', 'set-allow-tunnel'].includes(input.action)) {
           throw new LiveActivityError('FORBIDDEN', 'The card view can only list, get, dismiss or read and change its own settings.');
         }
         const value =
           input.action === 'settings'
             ? settings()
             : input.action === 'set-lan-access'
-              ? await setLanAccess(input.enabled === true)
+              ? await setSwitch('lanAccess', input.enabled === true)
+              : input.action === 'set-allow-tunnel'
+                ? await setSwitch('allowTunnel', input.enabled === true)
               : await store.run(input);
         return Response.json({ ok: true, value }, { headers: { 'Cache-Control': 'no-store' } });
       } catch (error) {

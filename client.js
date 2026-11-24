@@ -42,6 +42,9 @@ window.__ModuleLoader__.load({
       lanEndpoint: 'Listening on {url}',
       lanToken: 'Token file',
       lanSaved: 'Saved. The listener has rebound.',
+      allowTunnel: 'SSH tunnels',
+      allowTunnelDesc: 'Let the agent open a reverse tunnel from a remote host back to this endpoint. Off by default; a tunnel opens a port on that host only, and closes with DSH.',
+      tunnelCount: '{n} tunnel(s) active',
       lanFailed: 'Could not read the endpoint settings.',
     };
     const zh = {
@@ -72,6 +75,9 @@ window.__ModuleLoader__.load({
       lanEndpoint: '监听地址 {url}',
       lanToken: '令牌文件',
       lanSaved: '已保存，监听地址已切换。',
+      allowTunnel: 'SSH 隧道',
+      allowTunnelDesc: '允许 agent 从远端主机反向开一条隧道指回本接口。默认关闭；隧道只在远端主机上开一个端口，随 DSH 关闭一起断开。',
+      tunnelCount: '{n} 条隧道活动中',
       lanFailed: '无法读取接口设置。',
     };
 
@@ -491,11 +497,11 @@ window.__ModuleLoader__.load({
       '.dlas-warn{font-size:11px;line-height:1.5;color:var(--dsw-alias-state-warn-primary)}',
     ].join('');
 
-    /** The bundle's own settings: the only switch that widens the listener. */
+    /** The bundle's own settings: the two switches that widen reach. */
     function PluginSettings(props) {
       const t = props.t;
-      const [state, setState] = useState({ value: null, error: null, busy: false });
-      const [saved, setSaved] = useState(false);
+      const [state, setState] = useState({ value: null, error: null, busy: null });
+      const [saved, setSaved] = useState(null);
       const load = useCallback(async () => {
         try {
           const value = await api({ action: 'settings' });
@@ -507,37 +513,36 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         load();
       }, [load]);
-      const enabled = state.value ? state.value.lanAccess === true : false;
-      const toggle = async () => {
-        const next = !enabled;
-        setState(previous => ({ ...previous, busy: true, error: null }));
-        setSaved(false);
+      const flip = async key => {
+        const next = !(state.value && state.value[key] === true);
+        setState(previous => ({ ...previous, busy: key, error: null }));
+        setSaved(null);
         try {
-          await api({ action: 'set-lan-access', enabled: next });
+          await api({ action: key === 'lanAccess' ? 'set-lan-access' : 'set-allow-tunnel', enabled: next });
           await new Promise(resolve => setTimeout(resolve, 1500));
           await load();
-          setSaved(true);
+          setSaved(key);
         } catch (error) {
           setState(previous => ({ ...previous, error }));
         } finally {
-          setState(previous => ({ ...previous, busy: false }));
+          setState(previous => ({ ...previous, busy: null }));
         }
       };
       if (props.view === 'summary') {
-        return h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, t('lanAccess'), ' · ', enabled ? t('lanOn') : t('lanOff'));
+        const parts = [];
+        if (state.value) parts.push(t('lanAccess'), ' ', state.value.lanAccess ? t('lanOn') : t('lanOff'));
+        return h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, parts.join(' · ') || t('lanAccess'));
       }
-      return h(
-        'div',
-        { className: 'dlas' },
-        h('style', null, SETTINGS_CSS),
-        h(
+      const row = (key, title, description) => {
+        const enabled = !!(state.value && state.value[key] === true);
+        return h(
           'div',
           { className: 'dlas-row' },
           h(
             'div',
             null,
-            h('div', { className: 'dlas-title' }, t('lanAccess'), ' · ', h('span', { className: 'dlas-meta' }, enabled ? t('lanOn') : t('lanOff'))),
-            h('div', { className: 'dlas-desc' }, t('lanAccessDesc')),
+            h('div', { className: 'dlas-title' }, title, ' · ', h('span', { className: 'dlas-meta' }, enabled ? t('lanOn') : t('lanOff'))),
+            h('div', { className: 'dlas-desc' }, description),
           ),
           h(
             'button',
@@ -546,15 +551,24 @@ window.__ModuleLoader__.load({
               className: 'dlas-switch',
               role: 'switch',
               'aria-checked': enabled,
-              'aria-label': t('lanAccess'),
-              disabled: state.busy || !state.value,
-              onClick: toggle,
+              'aria-label': title,
+              disabled: state.busy !== null || !state.value,
+              onClick: () => flip(key),
             },
             h('i'),
           ),
-        ),
+        );
+      };
+      const tunnelCount = state.value && Array.isArray(state.value.tunnels) ? state.value.tunnels.length : 0;
+      return h(
+        'div',
+        { className: 'dlas' },
+        h('style', null, SETTINGS_CSS),
+        row('lanAccess', t('lanAccess'), t('lanAccessDesc')),
+        row('allowTunnel', t('allowTunnel'), t('allowTunnelDesc')),
         state.value ? h('div', { className: 'dlas-meta' }, t('lanEndpoint', { url: state.value.url })) : null,
         state.value ? h('div', { className: 'dlas-meta' }, t('lanToken'), ': ', state.value.tokenFile) : null,
+        state.value && state.value.allowTunnel ? h('div', { className: 'dlas-meta' }, t('tunnelCount', { n: tunnelCount })) : null,
         saved ? h('div', { className: 'dlas-meta', role: 'status' }, t('lanSaved')) : null,
         state.error ? h('div', { className: 'dlas-warn', role: 'alert' }, t('lanFailed'), ' ', state.error.message) : null,
       );
